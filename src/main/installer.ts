@@ -1,6 +1,6 @@
 import { spawn, execSync, execFile } from "child_process";
 import { existsSync, readFileSync, readdirSync } from "fs";
-import { join } from "path";
+import { delimiter, join } from "path";
 import { homedir } from "os";
 import type { BrowserWindow } from "electron";
 import { getModelConfig, getConnectionConfig } from "./config";
@@ -33,7 +33,27 @@ export interface InstallProgress {
 
 export function getEnhancedPath(): string {
   const home = homedir();
+  const windowsExtra =
+    process.platform === "win32"
+      ? [
+          process.env.NVM_SYMLINK,
+          process.env.APPDATA ? join(process.env.APPDATA, "npm") : undefined,
+          process.env.ProgramFiles
+            ? join(process.env.ProgramFiles, "nodejs")
+            : undefined,
+          process.env["ProgramFiles(x86)"]
+            ? join(process.env["ProgramFiles(x86)"], "nodejs")
+            : undefined,
+          process.env.ProgramFiles
+            ? join(process.env.ProgramFiles, "Git", "cmd")
+            : undefined,
+          process.env.LOCALAPPDATA
+            ? join(process.env.LOCALAPPDATA, "Programs", "Git", "cmd")
+            : undefined,
+        ]
+      : [];
   const extra = [
+    ...windowsExtra,
     join(home, ".local", "bin"),
     join(home, ".cargo", "bin"),
     join(HERMES_VENV, "bin"),
@@ -46,8 +66,8 @@ export function getEnhancedPath(): string {
     "/usr/local/bin",
     "/opt/homebrew/bin",
     "/opt/homebrew/sbin",
-  ];
-  return [...extra, process.env.PATH || ""].join(":");
+  ].filter((entry): entry is string => Boolean(entry));
+  return [...extra, process.env.PATH || ""].filter(Boolean).join(delimiter);
 }
 
 /** Resolve the active nvm node version's bin directory. */
