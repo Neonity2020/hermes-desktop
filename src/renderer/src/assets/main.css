@@ -1253,6 +1253,17 @@ body {
   background: var(--agent-bubble);
   color: var(--agent-bubble-text);
   border-bottom-left-radius: 4px;
+  /* Agent messages are rendered markdown HTML — preserve structure
+     via the elements themselves, not literal whitespace. Overrides
+     .chat-bubble's pre-wrap, which would otherwise turn newlines
+     between <li> tags into visible blank lines. */
+  white-space: normal;
+}
+
+.chat-bubble-agent pre,
+.chat-bubble-agent code {
+  /* Restore preserved whitespace inside code blocks and inline code. */
+  white-space: pre-wrap;
 }
 
 .chat-bubble-agent code {
@@ -1400,7 +1411,7 @@ body {
 
 /* Override Tailwind preflight spacing inside agent bubbles */
 .chat-bubble-agent p {
-  margin: 0 0 6px !important;
+  margin: 0 0 0.85em !important;
   padding: 0 !important;
 }
 .chat-bubble-agent p:last-child {
@@ -1408,7 +1419,7 @@ body {
 }
 .chat-bubble-agent ul,
 .chat-bubble-agent ol {
-  margin: 2px 0 6px 18px !important;
+  margin: 0.5em 0 0.75em 1.5em !important;
   padding: 0 !important;
   list-style: revert !important;
 }
@@ -1427,7 +1438,7 @@ body {
 .chat-bubble-agent h2,
 .chat-bubble-agent h3,
 .chat-bubble-agent h4 {
-  margin: 8px 0 3px !important;
+  margin: 1em 0 0.5em !important;
   padding: 0 !important;
   font-weight: 600;
 }
