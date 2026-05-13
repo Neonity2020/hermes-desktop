@@ -16,6 +16,7 @@ export default {
     english: "English",
     spanish: "Espanyol",
     indonesian: "Bahasa Indonesia",
+    japanese: "日本語",
     chinese: "China",
     portuguese: "Portugis",
     hint: "Pilih bahasa antarmuka",

@@ -11,6 +11,7 @@ const LANGUAGE_LABEL_KEYS: Record<AppLocale, string> = {
   en: "settings.language.english",
   es: "settings.language.spanish",
   id: "settings.language.indonesian",
+  ja: "settings.language.japanese",
   "pt-BR": "settings.language.portuguese",
   "zh-CN": "settings.language.chinese",
 };
