@@ -97,7 +97,6 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.blockmap
-            dist/latest-mac.yml
 
   release_linux:
     name: Build Linux
@@ -222,6 +221,70 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Generate macOS update metadata
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          node <<'NODE'
+          const crypto = require("crypto");
+          const fs = require("fs");
+          const path = require("path");
+
+          const artifactsDir = path.join(process.cwd(), "artifacts");
+          const version = process.env.VERSION;
+          const zipNames = fs
+            .readdirSync(artifactsDir)
+            .filter(
+              (name) =>
+                name.startsWith(`hermes-desktop-${version}-`) &&
+                name.endsWith("-mac.zip"),
+            )
+            .sort((a, b) => {
+              if (a.includes("-x64-")) return -1;
+              if (b.includes("-x64-")) return 1;
+              return a.localeCompare(b);
+            });
+
+          if (
+            zipNames.length < 2 ||
+            !zipNames.some((name) => name.includes("-x64-")) ||
+            !zipNames.some((name) => name.includes("-arm64-"))
+          ) {
+            throw new Error(
+              `Expected x64 and arm64 macOS zips, found: ${zipNames.join(", ")}`,
+            );
+          }
+
+          const files = zipNames.map((name) => {
+            const filePath = path.join(artifactsDir, name);
+            return {
+              url: name,
+              sha512: crypto
+                .createHash("sha512")
+                .update(fs.readFileSync(filePath))
+                .digest("base64"),
+              size: fs.statSync(filePath).size,
+            };
+          });
+          const primary = files.find((file) => file.url.includes("-x64-")) || files[0];
+          const releaseDate = new Date().toISOString();
+          const lines = [
+            `version: ${version}`,
+            "files:",
+            ...files.flatMap((file) => [
+              `  - url: ${file.url}`,
+              `    sha512: ${file.sha512}`,
+              `    size: ${file.size}`,
+            ]),
+            `path: ${primary.url}`,
+            `sha512: ${primary.sha512}`,
+            `releaseDate: '${releaseDate}'`,
+            "",
+          ];
+
+          fs.writeFileSync(path.join(artifactsDir, "latest-mac.yml"), lines.join("\n"));
+          NODE
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

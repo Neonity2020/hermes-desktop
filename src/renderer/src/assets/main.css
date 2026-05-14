@@ -939,6 +939,23 @@ body {
   background: var(--accent-hover);
 }
 
+.sidebar-update-btn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.sidebar-update-btn:disabled:hover {
+  background: var(--accent);
+}
+
+.sidebar-update-btn.error {
+  background: var(--error);
+}
+
+.sidebar-update-btn.error:hover {
+  background: var(--error);
+}
+
 /* Theme Switcher */
 .theme-switcher {
   display: flex;

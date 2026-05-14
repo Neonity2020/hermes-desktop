@@ -41,6 +41,7 @@ export default {
   updateAvailable: "Atualização v{{version}}",
   downloading: "Baixando {{percent}}%",
   restartToUpdate: "Reiniciar para atualizar",
+  updateFailed: "Falha ao atualizar",
   errorTitle: "Algo deu errado",
   errorMessage: "Ocorreu um erro inesperado.",
   tryAgain: "Tentar Novamente",
