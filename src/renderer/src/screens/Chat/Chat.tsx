@@ -3,8 +3,6 @@ import icon from "../../assets/icon.png";
 import { AgentMarkdown } from "../../components/AgentMarkdown";
 import {
   Trash2 as Trash,
-  Send,
-  Square as Stop,
   Plus,
   ChevronDown,
   Search,
@@ -13,114 +11,10 @@ import {
   Code,
   ChartLine,
   Bell,
-  Slash,
   Zap,
 } from "lucide-react";
-import { isImeComposing } from "./keyboard";
-
-// ── Slash Commands ──────────────────────────────────────
-
-interface SlashCommand {
-  name: string;
-  description: string;
-  category: "chat" | "agent" | "tools" | "info";
-  /** If true, the command is handled locally instead of sent to the backend */
-  local?: boolean;
-}
-
-const SLASH_COMMANDS: SlashCommand[] = [
-  // Chat control
-  {
-    name: "/new",
-    description: "Start a new chat",
-    category: "chat",
-    local: true,
-  },
-  {
-    name: "/clear",
-    description: "Clear conversation history",
-    category: "chat",
-    local: true,
-  },
-  // Agent commands (sent to backend)
-  {
-    name: "/btw",
-    description: "Ask a side question without affecting context",
-    category: "agent",
-  },
-  {
-    name: "/approve",
-    description: "Approve a pending action",
-    category: "agent",
-  },
-  { name: "/deny", description: "Deny a pending action", category: "agent" },
-  {
-    name: "/status",
-    description: "Show current agent status",
-    category: "agent",
-  },
-  {
-    name: "/reset",
-    description: "Reset conversation context",
-    category: "agent",
-  },
-  {
-    name: "/compact",
-    description: "Compact and summarize the conversation",
-    category: "agent",
-  },
-  { name: "/undo", description: "Undo the last action", category: "agent" },
-  {
-    name: "/retry",
-    description: "Retry the last failed action",
-    category: "agent",
-  },
-  {
-    name: "/fast",
-    description: "Toggle priority processing (lower latency)",
-    category: "agent",
-    local: true,
-  },
-  {
-    name: "/compress",
-    description: "Compress conversation with optional focus topic",
-    category: "agent",
-  },
-  {
-    name: "/usage",
-    description: "Show token usage, cost, and rate limits",
-    category: "agent",
-    local: true,
-  },
-  {
-    name: "/debug",
-    description: "Show diagnostics and debug info",
-    category: "agent",
-  },
-  // Tools & capabilities
-  { name: "/web", description: "Search the web", category: "tools" },
-  { name: "/image", description: "Generate an image", category: "tools" },
-  { name: "/browse", description: "Browse a URL", category: "tools" },
-  { name: "/code", description: "Write or execute code", category: "tools" },
-  { name: "/file", description: "Read or write files", category: "tools" },
-  { name: "/shell", description: "Run a shell command", category: "tools" },
-  // Info
-  {
-    name: "/help",
-    description: "Show available commands and help",
-    category: "info",
-  },
-  { name: "/tools", description: "List available tools", category: "info" },
-  { name: "/skills", description: "List installed skills", category: "info" },
-  {
-    name: "/model",
-    description: "Show or switch the current model",
-    category: "info",
-  },
-  { name: "/memory", description: "Show agent memory", category: "info" },
-  { name: "/persona", description: "Show current persona", category: "info" },
-  { name: "/version", description: "Show Hermes version", category: "info" },
-];
+import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
 
 function HermesAvatar({ size = 30 }: { size?: number }): React.JSX.Element {
   return (
@@ -218,7 +112,6 @@ function Chat({
   onNewChat,
 }: ChatProps): React.JSX.Element {
   const { t } = useI18n();
-  const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [hermesSessionId, setHermesSessionId] = useState<string | null>(null);
   const [toolProgress, setToolProgress] = useState<string | null>(null);
@@ -231,7 +124,7 @@ function Chat({
   const [fastMode, setFastMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const chatInputRef = useRef<ChatInputHandle>(null);
   const isLoadingRef = useRef(false);
   const userScrolledUpRef = useRef(false);
 
@@ -244,28 +137,8 @@ function Chat({
   const [customModelInput, setCustomModelInput] = useState("");
   const pickerRef = useRef<HTMLDivElement>(null);
 
-  // Slash command menu state
-  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
-  const [slashFilter, setSlashFilter] = useState("");
-  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
-  const [inputHistory, setInputHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const [historyDraft, setHistoryDraft] = useState("");
-  const slashMenuRef = useRef<HTMLDivElement>(null);
-
   // Keep ref in sync for use in IPC callbacks
   isLoadingRef.current = isLoading;
-
-  // Filtered slash commands based on current input
-  const filteredSlashCommands = useMemo(
-    () =>
-      slashMenuOpen
-        ? SLASH_COMMANDS.filter((cmd) =>
-            cmd.name.toLowerCase().startsWith(slashFilter.toLowerCase()),
-          )
-        : [],
-    [slashMenuOpen, slashFilter],
-  );
 
   const scrollToBottom = useCallback((force?: boolean) => {
     if (!force && userScrolledUpRef.current) return;
@@ -344,30 +217,6 @@ function Chat({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showModelPicker]);
-
-  // Close slash menu on click outside
-  useEffect(() => {
-    if (!slashMenuOpen) return;
-    function handleClickOutside(e: MouseEvent): void {
-      if (
-        slashMenuRef.current &&
-        !slashMenuRef.current.contains(e.target as Node)
-      ) {
-        setSlashMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [slashMenuOpen]);
-
-  // Scroll active slash menu item into view
-  useEffect(() => {
-    if (!slashMenuOpen) return;
-    const active = slashMenuRef.current?.querySelector(
-      ".slash-menu-item-active",
-    );
-    active?.scrollIntoView({ block: "nearest" });
-  }, [slashSelectedIndex, slashMenuOpen]);
 
   async function selectModel(
     provider: string,
@@ -473,12 +322,6 @@ function Chat({
     }
   }, [messages, scrollToBottom]);
 
-  useEffect(() => {
-    if (!isLoading) {
-      inputRef.current?.focus();
-    }
-  }, [isLoading]);
-
   // Keyboard shortcut: Cmd+N for new chat
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent): void {
@@ -491,191 +334,79 @@ function Chat({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onNewChat]);
 
-  async function handleSend(): Promise<void> {
-    const text = input.trim();
-    if (!text || isLoading) return;
+  const handleSend = useCallback(
+    async (text: string): Promise<void> => {
+      if (!text || isLoading) return;
 
-    setSlashMenuOpen(false);
-    setInputHistory((prev) => [...prev, text]);
-    setHistoryIndex(-1);
-    setHistoryDraft("");
-    setInput("");
-
-    if (inputRef.current) {
-      inputRef.current.style.height = "auto";
-    }
-
-    // Intercept slash commands that can be handled locally
-    if (text.startsWith("/")) {
-      const cmd = text.split(/\s+/)[0].toLowerCase();
-      const isLocal = SLASH_COMMANDS.some(
-        (c) => c.name === cmd && (c.local || c.category === "info"),
-      );
-      if (isLocal) {
-        if (cmd !== "/new" && cmd !== "/clear") {
-          setMessages((prev) => [
-            ...prev,
-            { id: `user-${Date.now()}`, role: "user", content: text },
-          ]);
-        }
-        await executeLocalCommand(text);
-        return;
-      }
-    }
-
-    setIsLoading(true);
-    setMessages((prev) => [
-      ...prev,
-      { id: `user-${Date.now()}`, role: "user", content: text },
-    ]);
-    onSessionStarted?.();
-
-    try {
-      await window.hermesAPI.sendMessage(
-        text,
-        profile,
-        hermesSessionId || undefined,
-        messages.map((m) => ({ role: m.role, content: m.content })),
-      );
-    } catch {
-      // Error already handled by onChatError IPC listener — avoid duplicate
-    }
-  }
-
-  async function handleQuickAsk(): Promise<void> {
-    const text = input.trim();
-    if (!text || isLoading) return;
-    // /btw sends an ephemeral side question that doesn't pollute conversation context
-    setInputHistory((prev) => [...prev, text]);
-    setHistoryIndex(-1);
-    setHistoryDraft("");
-    setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
-    setIsLoading(true);
-    setMessages((prev) => [
-      ...prev,
-      { id: `user-btw-${Date.now()}`, role: "user", content: `💭 ${text}` },
-    ]);
-    try {
-      await window.hermesAPI.sendMessage(
-        `/btw ${text}`,
-        profile,
-        hermesSessionId || undefined,
-        messages.map((m) => ({ role: m.role, content: m.content })),
-      );
-    } catch {
-      // Error already handled by onChatError IPC listener — avoid duplicate
-    }
-  }
-
-  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
-    if (isImeComposing(e)) {
-      return;
-    }
-
-    // Slash menu keyboard navigation
-    if (slashMenuOpen && filteredSlashCommands.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setSlashSelectedIndex((i) =>
-          i < filteredSlashCommands.length - 1 ? i + 1 : 0,
+      // Intercept slash commands that can be handled locally
+      if (text.startsWith("/")) {
+        const cmd = text.split(/\s+/)[0].toLowerCase();
+        const isLocal = SLASH_COMMANDS.some(
+          (c) => c.name === cmd && (c.local || c.category === "info"),
         );
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setSlashSelectedIndex((i) =>
-          i > 0 ? i - 1 : filteredSlashCommands.length - 1,
-        );
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        handleSlashSelect(filteredSlashCommands[slashSelectedIndex]);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setSlashMenuOpen(false);
-        return;
-      }
-    }
-
-    // History navigation: ArrowUp/Down when not in a multiline input (or already navigating)
-    if (!slashMenuOpen && (historyIndex !== -1 || !input.includes("\n"))) {
-      if (e.key === "ArrowUp" && inputHistory.length > 0) {
-        e.preventDefault();
-        const newIndex =
-          historyIndex === -1 ? inputHistory.length - 1 : Math.max(0, historyIndex - 1);
-        if (historyIndex === -1) setHistoryDraft(input);
-        setHistoryIndex(newIndex);
-        const recalled = inputHistory[newIndex];
-        setInput(recalled);
-        requestAnimationFrame(() => {
-          if (inputRef.current) {
-            inputRef.current.style.height = "auto";
-            inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-            inputRef.current.setSelectionRange(recalled.length, recalled.length);
+        if (isLocal) {
+          if (cmd !== "/new" && cmd !== "/clear") {
+            setMessages((prev) => [
+              ...prev,
+              { id: `user-${Date.now()}`, role: "user", content: text },
+            ]);
           }
-        });
-        return;
-      }
-      if (e.key === "ArrowDown" && historyIndex !== -1) {
-        e.preventDefault();
-        if (historyIndex < inputHistory.length - 1) {
-          const newIndex = historyIndex + 1;
-          setHistoryIndex(newIndex);
-          const recalled = inputHistory[newIndex];
-          setInput(recalled);
-          requestAnimationFrame(() => {
-            if (inputRef.current) {
-              inputRef.current.style.height = "auto";
-              inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-              inputRef.current.setSelectionRange(recalled.length, recalled.length);
-            }
-          });
-        } else {
-          setHistoryIndex(-1);
-          setInput(historyDraft);
-          requestAnimationFrame(() => {
-            if (inputRef.current) {
-              inputRef.current.style.height = "auto";
-              inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
-              inputRef.current.setSelectionRange(historyDraft.length, historyDraft.length);
-            }
-          });
+          await executeLocalCommand(text);
+          return;
         }
-        return;
       }
-    }
 
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  }
+      setIsLoading(true);
+      setMessages((prev) => [
+        ...prev,
+        { id: `user-${Date.now()}`, role: "user", content: text },
+      ]);
+      onSessionStarted?.();
 
-  function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>): void {
-    const value = e.target.value;
-    setInput(value);
+      try {
+        await window.hermesAPI.sendMessage(
+          text,
+          profile,
+          hermesSessionId || undefined,
+          messages.map((m) => ({ role: m.role, content: m.content })),
+        );
+      } catch {
+        // Error already handled by onChatError IPC listener — avoid duplicate
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      isLoading,
+      profile,
+      hermesSessionId,
+      messages,
+      onSessionStarted,
+      setMessages,
+    ],
+  );
 
-    // Defer reflow-triggering resize to next frame
-    const target = e.target;
-    requestAnimationFrame(() => {
-      target.style.height = "auto";
-      target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
-    });
-
-    // Slash command detection: open menu when input starts with /
-    if (value.startsWith("/") && !value.includes(" ")) {
-      const query = value.split(" ")[0];
-      setSlashMenuOpen(true);
-      setSlashFilter(query);
-      setSlashSelectedIndex(0);
-    } else if (slashMenuOpen) {
-      setSlashMenuOpen(false);
-    }
-  }
+  const handleQuickAsk = useCallback(
+    async (text: string): Promise<void> => {
+      if (!text || isLoading) return;
+      // /btw sends an ephemeral side question that doesn't pollute conversation context
+      setIsLoading(true);
+      setMessages((prev) => [
+        ...prev,
+        { id: `user-btw-${Date.now()}`, role: "user", content: `💭 ${text}` },
+      ]);
+      try {
+        await window.hermesAPI.sendMessage(
+          `/btw ${text}`,
+          profile,
+          hermesSessionId || undefined,
+          messages.map((m) => ({ role: m.role, content: m.content })),
+        );
+      } catch {
+        // Error already handled by onChatError IPC listener — avoid duplicate
+      }
+    },
+    [isLoading, profile, hermesSessionId, messages, setMessages],
+  );
 
   /** Push a fake agent message into the chat (for locally-handled commands). */
   function pushLocalResponse(content: string): void {
@@ -842,36 +573,11 @@ function Chat({
     }
   }
 
-  function handleSlashSelect(cmd: SlashCommand): void {
-    setSlashMenuOpen(false);
-    setInput("");
-    if (inputRef.current) inputRef.current.style.height = "auto";
-
-    // Commands that need no arguments — execute immediately
-    if (cmd.local || ["info"].includes(cmd.category)) {
-      // Show as user message for non-UI commands
-      if (cmd.name !== "/new" && cmd.name !== "/clear") {
-        setMessages((prev) => [
-          ...prev,
-          { id: `user-${Date.now()}`, role: "user", content: cmd.name },
-        ]);
-      }
-      executeLocalCommand(cmd.name);
-      return;
-    }
-
-    // For backend commands that take arguments, insert command + space
-    const newValue = cmd.name + " ";
-    setInput(newValue);
-    inputRef.current?.focus();
-  }
-
-  function handleAbort(): void {
+  const handleAbort = useCallback(() => {
     window.hermesAPI.abortChat();
     setIsLoading(false);
-    // Refocus input after aborting
-    setTimeout(() => inputRef.current?.focus(), 50);
-  }
+    setTimeout(() => chatInputRef.current?.focus(), 50);
+  }, []);
 
   function handleClear(): void {
     // Abort any in-flight request before clearing
@@ -886,7 +592,7 @@ function Chat({
   }
 
   const handleApprove = useCallback(() => {
-    setInput("");
+    chatInputRef.current?.clear();
     setIsLoading(true);
     setMessages((prev) => [
       ...prev,
@@ -899,7 +605,7 @@ function Chat({
   }, [profile, hermesSessionId, setMessages, messages]);
 
   const handleDeny = useCallback(() => {
-    setInput("");
+    chatInputRef.current?.clear();
     setIsLoading(true);
     setMessages((prev) => [
       ...prev,
@@ -1011,64 +717,66 @@ function Chat({
             <div className="chat-empty-suggestions">
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput("Search the web for today's top tech news");
-                  inputRef.current?.focus();
-                }}
+                onClick={() =>
+                  chatInputRef.current?.setText(
+                    "Search the web for today's top tech news",
+                  )
+                }
               >
                 <Search size={16} />
                 {t("chat.suggestionSearch")}
               </button>
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput("Set a reminder to check emails every day at 9 AM");
-                  inputRef.current?.focus();
-                }}
+                onClick={() =>
+                  chatInputRef.current?.setText(
+                    "Set a reminder to check emails every day at 9 AM",
+                  )
+                }
               >
                 <Bell size={16} />
                 {t("chat.suggestionReminder")}
               </button>
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput("Read my latest emails and summarize them");
-                  inputRef.current?.focus();
-                }}
+                onClick={() =>
+                  chatInputRef.current?.setText(
+                    "Read my latest emails and summarize them",
+                  )
+                }
               >
                 <Mail size={16} />
                 {t("chat.suggestionEmail")}
               </button>
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput(
+                onClick={() =>
+                  chatInputRef.current?.setText(
                     "Write a Python script to rename all files in a folder",
-                  );
-                  inputRef.current?.focus();
-                }}
+                  )
+                }
               >
                 <Code size={16} />
                 {t("chat.suggestionScript")}
               </button>
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput(
+                onClick={() =>
+                  chatInputRef.current?.setText(
                     "Schedule a cron job to back up my database every night",
-                  );
-                  inputRef.current?.focus();
-                }}
+                  )
+                }
               >
                 <Clock size={16} />
                 {t("chat.suggestionSchedule")}
               </button>
               <button
                 className="chat-suggestion"
-                onClick={() => {
-                  setInput("Analyze this CSV file and show key insights");
-                  inputRef.current?.focus();
-                }}
+                onClick={() =>
+                  chatInputRef.current?.setText(
+                    "Analyze this CSV file and show key insights",
+                  )
+                }
               >
                 <ChartLine size={16} />
                 {t("chat.suggestionAnalyze")}
@@ -1113,70 +821,14 @@ function Chat({
       </div>
 
       <div className="chat-input-area">
-        {slashMenuOpen && filteredSlashCommands.length > 0 && (
-          <div className="slash-menu" ref={slashMenuRef}>
-            <div className="slash-menu-header">
-              <Slash size={12} />
-              {t("chat.commandsTitle")}
-            </div>
-            <div className="slash-menu-list">
-              {filteredSlashCommands.map((cmd, i) => (
-                <button
-                  key={cmd.name}
-                  className={`slash-menu-item ${i === slashSelectedIndex ? "slash-menu-item-active" : ""}`}
-                  onMouseEnter={() => setSlashSelectedIndex(i)}
-                  onClick={() => handleSlashSelect(cmd)}
-                >
-                  <span className="slash-menu-item-name">{cmd.name}</span>
-                  <span className="slash-menu-item-desc">
-                    {cmd.description}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="chat-input-wrapper">
-          <textarea
-            ref={inputRef}
-            className="chat-input"
-            placeholder={t("chat.typeMessage")}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            rows={1}
-            autoFocus
-          />
-          {isLoading ? (
-            <button
-              className="chat-send-btn chat-stop-btn"
-              onClick={handleAbort}
-              title={t("common.stop")}
-            >
-              <Stop size={14} />
-            </button>
-          ) : (
-            <>
-              {input.trim() && hermesSessionId && (
-                <button
-                  className="chat-btw-btn"
-                  onClick={handleQuickAsk}
-                  title={t("chat.quickAskTitle")}
-                >
-                  💭
-                </button>
-              )}
-              <button
-                className="chat-send-btn"
-                onClick={handleSend}
-                disabled={!input.trim()}
-                title={t("chat.send")}
-              >
-                <Send size={16} />
-              </button>
-            </>
-          )}
-        </div>
+        <ChatInput
+          ref={chatInputRef}
+          isLoading={isLoading}
+          hasSession={!!hermesSessionId}
+          onSubmit={handleSend}
+          onQuickAsk={handleQuickAsk}
+          onAbort={handleAbort}
+        />
 
         <div className="chat-model-bar" ref={pickerRef}>
           <button
