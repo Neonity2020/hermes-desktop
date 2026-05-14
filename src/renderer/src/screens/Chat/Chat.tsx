@@ -248,6 +248,9 @@ function Chat({
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [historyDraft, setHistoryDraft] = useState("");
   const slashMenuRef = useRef<HTMLDivElement>(null);
 
   // Keep ref in sync for use in IPC callbacks
@@ -493,6 +496,9 @@ function Chat({
     if (!text || isLoading) return;
 
     setSlashMenuOpen(false);
+    setInputHistory((prev) => [...prev, text]);
+    setHistoryIndex(-1);
+    setHistoryDraft("");
     setInput("");
 
     if (inputRef.current) {
@@ -540,6 +546,9 @@ function Chat({
     const text = input.trim();
     if (!text || isLoading) return;
     // /btw sends an ephemeral side question that doesn't pollute conversation context
+    setInputHistory((prev) => [...prev, text]);
+    setHistoryIndex(-1);
+    setHistoryDraft("");
     setInput("");
     if (inputRef.current) inputRef.current.style.height = "auto";
     setIsLoading(true);
@@ -588,6 +597,54 @@ function Chat({
       if (e.key === "Escape") {
         e.preventDefault();
         setSlashMenuOpen(false);
+        return;
+      }
+    }
+
+    // History navigation: ArrowUp/Down when not in a multiline input (or already navigating)
+    if (!slashMenuOpen && (historyIndex !== -1 || !input.includes("\n"))) {
+      if (e.key === "ArrowUp" && inputHistory.length > 0) {
+        e.preventDefault();
+        const newIndex =
+          historyIndex === -1 ? inputHistory.length - 1 : Math.max(0, historyIndex - 1);
+        if (historyIndex === -1) setHistoryDraft(input);
+        setHistoryIndex(newIndex);
+        const recalled = inputHistory[newIndex];
+        setInput(recalled);
+        requestAnimationFrame(() => {
+          if (inputRef.current) {
+            inputRef.current.style.height = "auto";
+            inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+            inputRef.current.setSelectionRange(recalled.length, recalled.length);
+          }
+        });
+        return;
+      }
+      if (e.key === "ArrowDown" && historyIndex !== -1) {
+        e.preventDefault();
+        if (historyIndex < inputHistory.length - 1) {
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          const recalled = inputHistory[newIndex];
+          setInput(recalled);
+          requestAnimationFrame(() => {
+            if (inputRef.current) {
+              inputRef.current.style.height = "auto";
+              inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+              inputRef.current.setSelectionRange(recalled.length, recalled.length);
+            }
+          });
+        } else {
+          setHistoryIndex(-1);
+          setInput(historyDraft);
+          requestAnimationFrame(() => {
+            if (inputRef.current) {
+              inputRef.current.style.height = "auto";
+              inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 120)}px`;
+              inputRef.current.setSelectionRange(historyDraft.length, historyDraft.length);
+            }
+          });
+        }
         return;
       }
     }
