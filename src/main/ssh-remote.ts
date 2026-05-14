@@ -18,6 +18,7 @@ import type { SavedModel } from "./models";
 import type { MemoryProviderInfo } from "./installer";
 import { t } from "../shared/i18n";
 import { getAppLocale } from "./locale";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 // ── SSH exec core ────────────────────────────────────────────────────────────
 
@@ -38,6 +39,7 @@ export function sshExec(config: SshConfig, command: string, stdin?: string, time
   return new Promise((resolve, reject) => {
     const child = spawn("ssh", [...buildExecArgs(config), command], {
       stdio: ["pipe", "pipe", "pipe"],
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     let stdout = "";
     let stderr = "";

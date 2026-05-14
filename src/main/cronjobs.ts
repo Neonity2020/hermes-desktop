@@ -5,6 +5,7 @@ import { execFile } from "child_process";
 import { HERMES_HOME, HERMES_PYTHON, hermesCliArgs } from "./installer";
 import { profileHome } from "./utils";
 import { isRemoteMode, getApiUrl, getRemoteAuthHeader } from "./hermes";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 export interface CronJob {
   id: string;
@@ -152,7 +153,11 @@ function runCronCommand(
     execFile(
       HERMES_PYTHON,
       cliArgs,
-      { cwd: join(HERMES_HOME, "hermes-agent"), timeout: 15000 },
+      {
+        cwd: join(HERMES_HOME, "hermes-agent"),
+        timeout: 15000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
+      },
       (err, stdout, stderr) => {
         if (err) {
           resolve({
