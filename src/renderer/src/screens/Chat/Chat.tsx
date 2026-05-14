@@ -1088,7 +1088,6 @@ function Chat({
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             rows={1}
-            disabled={isLoading}
             autoFocus
           />
           {isLoading ? (
