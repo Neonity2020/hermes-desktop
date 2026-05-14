@@ -3,6 +3,7 @@ import {
   useRef,
   useEffect,
   useMemo,
+  useCallback,
   forwardRef,
   useImperativeHandle,
 } from "react";
@@ -10,6 +11,7 @@ import { Send, Square as Stop, Slash } from "lucide-react";
 import { isImeComposing } from "./keyboard";
 import { useI18n } from "../../components/useI18n";
 import { SLASH_COMMANDS, type SlashCommand } from "./slashCommands";
+import { useInputHistory } from "./hooks/useInputHistory";
 
 export interface ChatInputHandle {
   setText(text: string): void;
@@ -32,21 +34,34 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
   ): React.JSX.Element {
     const { t } = useI18n();
     const [input, setInput] = useState("");
-    const [inputHistory, setInputHistory] = useState<string[]>([]);
-    const [historyIndex, setHistoryIndex] = useState(-1);
-    const [historyDraft, setHistoryDraft] = useState("");
     const [slashMenuOpen, setSlashMenuOpen] = useState(false);
     const [slashFilter, setSlashFilter] = useState("");
     const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const slashMenuRef = useRef<HTMLDivElement>(null);
 
-    function autoResize(): void {
+    const autoResize = useCallback((): void => {
       const el = inputRef.current;
       if (!el) return;
       el.style.height = "auto";
       el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-    }
+    }, []);
+
+    const applyHistoryText = useCallback(
+      (text: string): void => {
+        setInput(text);
+        requestAnimationFrame(() => {
+          autoResize();
+          inputRef.current?.setSelectionRange(text.length, text.length);
+        });
+      },
+      [autoResize],
+    );
+
+    const history = useInputHistory({
+      currentInput: input,
+      applyText: applyHistoryText,
+    });
 
     useImperativeHandle(
       ref,
@@ -69,7 +84,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
           inputRef.current?.focus();
         },
       }),
-      [],
+      [autoResize],
     );
 
     // Refocus the textarea when a streaming response ends
@@ -112,28 +127,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       [slashMenuOpen, slashFilter],
     );
 
-    function pushHistory(text: string): void {
-      setInputHistory((prev) => [...prev, text]);
-      setHistoryIndex(-1);
-      setHistoryDraft("");
+    function clearAfterSend(text: string): void {
+      history.push(text);
+      setInput("");
+      if (inputRef.current) inputRef.current.style.height = "auto";
     }
 
     function handleSend(): void {
       const text = input.trim();
       if (!text || isLoading) return;
       setSlashMenuOpen(false);
-      pushHistory(text);
-      setInput("");
-      if (inputRef.current) inputRef.current.style.height = "auto";
+      clearAfterSend(text);
       onSubmit(text);
     }
 
     function handleQuickAsk(): void {
       const text = input.trim();
       if (!text || isLoading) return;
-      pushHistory(text);
-      setInput("");
-      if (inputRef.current) inputRef.current.style.height = "auto";
+      clearAfterSend(text);
       onQuickAsk(text);
     }
 
@@ -173,27 +184,6 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       }
     }
 
-    function recallHistoryAt(index: number): void {
-      const recalled = inputHistory[index];
-      setInput(recalled);
-      requestAnimationFrame(() => {
-        autoResize();
-        inputRef.current?.setSelectionRange(recalled.length, recalled.length);
-      });
-    }
-
-    function restoreDraft(): void {
-      setHistoryIndex(-1);
-      setInput(historyDraft);
-      requestAnimationFrame(() => {
-        autoResize();
-        inputRef.current?.setSelectionRange(
-          historyDraft.length,
-          historyDraft.length,
-        );
-      });
-    }
-
     function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>): void {
       if (isImeComposing(e)) return;
 
@@ -226,28 +216,18 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(
       }
 
       // History navigation: ArrowUp/Down when not in a multiline draft (or already navigating)
-      if (!slashMenuOpen && (historyIndex !== -1 || !input.includes("\n"))) {
-        if (e.key === "ArrowUp" && inputHistory.length > 0) {
-          e.preventDefault();
-          const newIndex =
-            historyIndex === -1
-              ? inputHistory.length - 1
-              : Math.max(0, historyIndex - 1);
-          if (historyIndex === -1) setHistoryDraft(input);
-          setHistoryIndex(newIndex);
-          recallHistoryAt(newIndex);
-          return;
-        }
-        if (e.key === "ArrowDown" && historyIndex !== -1) {
-          e.preventDefault();
-          if (historyIndex < inputHistory.length - 1) {
-            const newIndex = historyIndex + 1;
-            setHistoryIndex(newIndex);
-            recallHistoryAt(newIndex);
-          } else {
-            restoreDraft();
+      if (!slashMenuOpen && (history.isNavigating() || !input.includes("\n"))) {
+        if (e.key === "ArrowUp" && history.size() > 0) {
+          if (history.recallPrev()) {
+            e.preventDefault();
+            return;
           }
-          return;
+        }
+        if (e.key === "ArrowDown" && history.isNavigating()) {
+          if (history.recallNext()) {
+            e.preventDefault();
+            return;
+          }
         }
       }
 
