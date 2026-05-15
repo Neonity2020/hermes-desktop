@@ -21,6 +21,7 @@ nsis:
   oneClick: true
   perMachine: false
 mac:
+  artifactName: ${name}-${version}-${arch}-${os}.${ext}
   icon: build/icon.icns
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
@@ -33,7 +34,7 @@ mac:
   gatekeeperAssess: false
   notarize: true
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage

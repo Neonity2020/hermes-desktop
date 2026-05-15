@@ -41,6 +41,7 @@ export default {
   updateAvailable: "更新 v{{version}}",
   downloading: "下载中 {{percent}}%",
   restartToUpdate: "重启以更新",
+  updateFailed: "更新失败",
   errorTitle: "出现错误",
   errorMessage: "发生了意外错误。",
   tryAgain: "重试",

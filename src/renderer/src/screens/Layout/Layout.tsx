@@ -113,14 +113,17 @@ function Layout({
   // Auto-update state
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [updateState, setUpdateState] = useState<
-    "available" | "downloading" | "ready" | null
+    "available" | "downloading" | "ready" | "error" | null
   >(null);
   const [downloadPercent, setDownloadPercent] = useState(0);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     const cleanupAvailable = window.hermesAPI.onUpdateAvailable((info) => {
       setUpdateVersion(info.version);
       setUpdateState("available");
+      setUpdateError(null);
+      setDownloadPercent(0);
     });
     const cleanupProgress = window.hermesAPI.onUpdateDownloadProgress(
       (info) => {
@@ -129,18 +132,33 @@ function Layout({
     );
     const cleanupDownloaded = window.hermesAPI.onUpdateDownloaded(() => {
       setUpdateState("ready");
+      setUpdateError(null);
+    });
+    const cleanupError = window.hermesAPI.onUpdateError((message) => {
+      setUpdateState("error");
+      setUpdateError(message);
+      setDownloadPercent(0);
     });
     return () => {
       cleanupAvailable();
       cleanupProgress();
       cleanupDownloaded();
+      cleanupError();
     };
   }, []);
 
   async function handleUpdate(): Promise<void> {
-    if (updateState === "available") {
+    if (updateState === "available" || updateState === "error") {
+      setUpdateError(null);
+      setDownloadPercent(0);
       setUpdateState("downloading");
-      await window.hermesAPI.downloadUpdate();
+      try {
+        const ok = await window.hermesAPI.downloadUpdate();
+        if (!ok) setUpdateState("error");
+      } catch (err) {
+        setUpdateError(err instanceof Error ? err.message : String(err));
+        setUpdateState("error");
+      }
     } else if (updateState === "ready") {
       await window.hermesAPI.installUpdate();
     }
@@ -211,7 +229,14 @@ function Layout({
 
         <div className="sidebar-footer">
           {updateState && (
-            <button className="sidebar-update-btn" onClick={handleUpdate}>
+            <button
+              className={`sidebar-update-btn ${
+                updateState === "error" ? "error" : ""
+              }`}
+              onClick={handleUpdate}
+              disabled={updateState === "downloading"}
+              title={updateError ?? undefined}
+            >
               <Download size={13} />
               {updateState === "available" && (
                 <span>
@@ -225,6 +250,9 @@ function Layout({
               )}
               {updateState === "ready" && (
                 <span>{t("common.restartToUpdate")}</span>
+              )}
+              {updateState === "error" && (
+                <span>{t("common.updateFailed")}</span>
               )}
             </button>
           )}
