@@ -15,6 +15,7 @@ export default {
     label: "Idioma",
     english: "English",
     indonesian: "Indonesio",
+    japanese: "日本語",
     chinese: "中文",
     portuguese: "Português",
     hint: "Escolha o idioma da interface",

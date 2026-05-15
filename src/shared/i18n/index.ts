@@ -86,6 +86,26 @@ import soulZh from "./locales/zh-CN/soul";
 import memoryZh from "./locales/zh-CN/memory";
 import installZh from "./locales/zh-CN/install";
 import constantsZh from "./locales/zh-CN/constants";
+import commonJa from "./locales/ja/common";
+import navigationJa from "./locales/ja/navigation";
+import welcomeJa from "./locales/ja/welcome";
+import setupJa from "./locales/ja/setup";
+import chatJa from "./locales/ja/chat";
+import settingsJa from "./locales/ja/settings";
+import toolsJa from "./locales/ja/tools";
+import sessionsJa from "./locales/ja/sessions";
+import modelsJa from "./locales/ja/models";
+import providersJa from "./locales/ja/providers";
+import officeJa from "./locales/ja/office";
+import errorsJa from "./locales/ja/errors";
+import schedulesJa from "./locales/ja/schedules";
+import skillsJa from "./locales/ja/skills";
+import gatewayJa from "./locales/ja/gateway";
+import agentsJa from "./locales/ja/agents";
+import soulJa from "./locales/ja/soul";
+import memoryJa from "./locales/ja/memory";
+import installJa from "./locales/ja/install";
+import constantsJa from "./locales/ja/constants";
 import commonPt from "./locales/pt-BR/common";
 import navigationPt from "./locales/pt-BR/navigation";
 import welcomePt from "./locales/pt-BR/welcome";
@@ -226,6 +246,30 @@ export const resources = {
       memory: memoryPt,
       install: installPt,
       constants: constantsPt,
+    },
+  },
+  ja: {
+    translation: {
+      common: commonJa,
+      navigation: navigationJa,
+      welcome: welcomeJa,
+      setup: setupJa,
+      chat: chatJa,
+      settings: settingsJa,
+      tools: toolsJa,
+      sessions: sessionsJa,
+      models: modelsJa,
+      providers: providersJa,
+      office: officeJa,
+      errors: errorsJa,
+      schedules: schedulesJa,
+      skills: skillsJa,
+      gateway: gatewayJa,
+      agents: agentsJa,
+      soul: soulJa,
+      memory: memoryJa,
+      install: installJa,
+      constants: constantsJa,
     },
   },
 } satisfies Resource;
