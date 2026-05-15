@@ -2313,6 +2313,75 @@ body {
   background: var(--accent-subtle);
 }
 
+/* Language picker dropdown */
+.settings-language-select {
+  position: relative;
+}
+
+.settings-language-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-primary);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: border-color var(--transition);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: left;
+}
+
+.settings-language-trigger:hover {
+  border-color: var(--border-bright);
+}
+
+.settings-language-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+  padding: 6px;
+}
+
+.settings-language-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+  transition: background var(--transition);
+}
+
+.settings-language-option:hover {
+  background: var(--bg-hover);
+}
+
+.settings-language-option.active {
+  background: var(--accent-subtle);
+  color: var(--accent-text);
+}
+
 /* ========================================================================
    AGENTS
    ======================================================================== */

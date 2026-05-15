@@ -14,7 +14,7 @@ export default {
   language: {
     label: "语言",
     english: "English",
-    indonesian: "å°å°¼è¯­",
+    indonesian: "印尼语",
     japanese: "日本語",
     spanish: "Español",
     chinese: "中文",
