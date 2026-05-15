@@ -2310,10 +2310,19 @@ body {
   justify-content: space-between;
 }
 
+.settings-platform-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
 .settings-platform-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .settings-platform-label {
