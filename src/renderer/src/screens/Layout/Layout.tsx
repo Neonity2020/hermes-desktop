@@ -260,6 +260,7 @@ function Layout({
                 onResumeSession={handleResumeSession}
                 onNewChat={handleNewChat}
                 currentSessionId={currentSessionId}
+                visible={view === "sessions"}
               />
             )}
           </div>
