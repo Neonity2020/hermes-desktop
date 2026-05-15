@@ -3,17 +3,17 @@ import { useTheme } from "../../components/ThemeProvider";
 import { THEME_OPTIONS } from "../../constants";
 import { useI18n } from "../../components/useI18n";
 import { APP_LOCALES, type AppLocale } from "../../../../shared/i18n";
-import { Download, Upload, FileText, Send } from "lucide-react";
+import { Check, ChevronDown, Download, Upload, FileText, Send } from "lucide-react";
 
 const TELEGRAM_COMMUNITY_URL = "https://t.me/hermes_agent_desktop";
 
-const LANGUAGE_LABEL_KEYS: Record<AppLocale, string> = {
-  en: "settings.language.english",
-  es: "settings.language.spanish",
-  id: "settings.language.indonesian",
-  ja: "settings.language.japanese",
-  "pt-BR": "settings.language.portuguese",
-  "zh-CN": "settings.language.chinese",
+const LANGUAGE_NATIVE_NAMES: Record<AppLocale, string> = {
+  en: "English",
+  es: "Español",
+  id: "Bahasa Indonesia",
+  ja: "日本語",
+  "pt-BR": "Português",
+  "zh-CN": "中文",
 };
 
 // Read cached values from localStorage for instant display
@@ -760,17 +760,7 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
           <label className="settings-field-label">
             {t("settings.language.label")}
           </label>
-          <div className="settings-theme-options">
-            {APP_LOCALES.map((supportedLocale) => (
-              <button
-                key={supportedLocale}
-                className={`settings-theme-option ${locale === supportedLocale ? "active" : ""}`}
-                onClick={() => setLocale(supportedLocale)}
-              >
-                {t(LANGUAGE_LABEL_KEYS[supportedLocale])}
-              </button>
-            ))}
-          </div>
+          <LanguageSelect locale={locale} onSelect={setLocale} />
           <div className="settings-field-hint">
             {t("settings.language.hint")}
           </div>
@@ -957,6 +947,73 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function LanguageSelect({
+  locale,
+  onSelect,
+}: {
+  locale: AppLocale;
+  onSelect: (l: AppLocale) => void;
+}): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handleClickOutside(e: MouseEvent): void {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    function handleKey(e: KeyboardEvent): void {
+      if (e.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [isOpen]);
+
+  return (
+    <div className="settings-language-select" ref={ref}>
+      <button
+        type="button"
+        className="settings-language-trigger"
+        onClick={() => setIsOpen((v) => !v)}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+      >
+        <span>{LANGUAGE_NATIVE_NAMES[locale]}</span>
+        <ChevronDown size={14} />
+      </button>
+      {isOpen && (
+        <div className="settings-language-dropdown" role="listbox">
+          {APP_LOCALES.map((l) => {
+            const active = l === locale;
+            return (
+              <button
+                key={l}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`settings-language-option ${active ? "active" : ""}`}
+                onClick={() => {
+                  onSelect(l);
+                  setIsOpen(false);
+                }}
+              >
+                <span>{LANGUAGE_NATIVE_NAMES[l]}</span>
+                {active && <Check size={14} />}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

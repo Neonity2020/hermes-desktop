@@ -10,6 +10,7 @@ export default {
   memory: "メモリ",
   tools: "ツール",
   schedules: "スケジュール",
+  kanban: "カンバン",
   gateway: "ゲートウェイ",
   settings: "設定",
 } as const;
