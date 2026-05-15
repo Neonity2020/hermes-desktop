@@ -14,6 +14,7 @@ import {
   isValidProfileName,
   PROFILE_NAME_ERROR,
 } from "./utils";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 const PROFILES_DIR = join(HERMES_HOME, "profiles");
 
@@ -217,6 +218,7 @@ export function createProfile(
       },
       stdio: "pipe",
       timeout: 15000,
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     return { success: true };
   } catch (err) {
@@ -250,6 +252,7 @@ export function deleteProfile(name: string): {
         },
         stdio: "pipe",
         timeout: 15000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
     );
     return { success: true };
@@ -276,6 +279,7 @@ export function setActiveProfile(name: string): void {
       },
       stdio: "pipe",
       timeout: 10000,
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
   } catch {
     // ignore

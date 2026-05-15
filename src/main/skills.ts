@@ -10,6 +10,7 @@ import {
   getEnhancedPath,
 } from "./installer";
 import { profileHome } from "./utils";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 export interface InstalledSkill {
   name: string;
@@ -148,6 +149,7 @@ export function searchSkills(query: string): SkillSearchResult[] {
         },
         stdio: ["ignore", "pipe", "pipe"],
         timeout: 30000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
     );
 
@@ -253,6 +255,7 @@ export function installSkill(
       },
       stdio: "pipe",
       timeout: 60000,
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     return { success: true };
   } catch (err) {
@@ -282,6 +285,7 @@ export function uninstallSkill(
       },
       stdio: "pipe",
       timeout: 30000,
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     return { success: true };
   } catch (err) {
