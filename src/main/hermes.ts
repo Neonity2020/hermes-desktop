@@ -15,6 +15,7 @@ import { getModelConfig, readEnv, getConnectionConfig } from "./config";
 import { getSshTunnelUrl, isSshTunnelActive, isSshTunnelHealthy, startSshTunnel } from "./ssh-tunnel";
 import { stripAnsi } from "./utils";
 import { readModels } from "./models";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 const LOCAL_API_URL = "http://127.0.0.1:8642";
 
@@ -561,6 +562,7 @@ function sendMessageViaCli(
     cwd: HERMES_REPO,
     env,
     stdio: ["ignore", "pipe", "pipe"],
+    ...HIDDEN_SUBPROCESS_OPTIONS,
   });
 
   let hasOutput = false;
@@ -660,7 +662,7 @@ export async function sendMessage(
 
   // Remote mode: always use API, no CLI fallback
   if (isRemoteMode()) {
-    return sendMessageViaApi(message, cb, profile, resumeSessionId);
+    return sendMessageViaApi(message, cb, profile, resumeSessionId, history);
   }
 
   // Check API server availability (cache the result, re-check periodically)
@@ -741,6 +743,7 @@ export function startGateway(profile?: string): boolean {
     env: gatewayEnv,
     stdio: "ignore",
     detached: true,
+    ...HIDDEN_SUBPROCESS_OPTIONS,
   });
 
   gatewayProcess.unref();

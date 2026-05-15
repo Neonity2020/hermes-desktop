@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { SETTINGS_SECTIONS, PROVIDERS } from "../../constants";
 import { useI18n } from "../../components/useI18n";
+import BrandLogo from "../../components/common/BrandLogo";
 
 function Providers({
   profile,
@@ -169,23 +170,30 @@ function Providers({
 
         <div className="settings-field">
           <label className="settings-field-label">{t("common.provider")}</label>
-          <select
-            className="input settings-select"
-            value={modelProvider}
-            onChange={(e) => {
-              const v = e.target.value;
-              setModelProvider(v);
-              if (v === "custom" && !modelBaseUrl) {
-                setModelBaseUrl("http://localhost:1234/v1");
-              }
-            }}
-          >
-            {PROVIDERS.options.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {t(opt.label)}
-              </option>
-            ))}
-          </select>
+          <div className="settings-provider-row">
+            <BrandLogo
+              provider={modelProvider}
+              modelId={modelName}
+              size={20}
+            />
+            <select
+              className="input settings-select"
+              value={modelProvider}
+              onChange={(e) => {
+                const v = e.target.value;
+                setModelProvider(v);
+                if (v === "custom" && !modelBaseUrl) {
+                  setModelBaseUrl("http://localhost:1234/v1");
+                }
+              }}
+            >
+              {PROVIDERS.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {t(opt.label)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="settings-field-hint">
             {isCustomProvider
               ? t("settings.customProviderHint")
@@ -279,6 +287,7 @@ function Providers({
               entries.length > 0 && (
                 <div key={provider} className="settings-pool-group">
                   <div className="settings-pool-provider">
+                    <BrandLogo provider={provider} size={16} />
                     {PROVIDERS.options.find((p) => p.value === provider)
                       ? t(
                           PROVIDERS.options.find((p) => p.value === provider)!
@@ -311,46 +320,77 @@ function Providers({
         </div>
       </div>
 
-      {SETTINGS_SECTIONS.map((section) => (
-        <div key={section.title} className="settings-section">
-          <div className="settings-section-title">{t(section.title)}</div>
-          {section.items.map((field) => (
-            <div key={field.key} className="settings-field">
-              <label className="settings-field-label">
-                {t(field.label)}
-                {savedKey === field.key && (
-                  <span className="settings-saved">{t("common.saved")}</span>
-                )}
-              </label>
-              <div className="settings-input-row">
-                <input
-                  className="input"
-                  type={
-                    field.type === "password" && !visibleKeys.has(field.key)
-                      ? "password"
-                      : "text"
+      {SETTINGS_SECTIONS.map((section) => {
+        const isLlmProviders = section.title === "constants.sectionLlmProviders";
+        return (
+          <div key={section.title} className="settings-section">
+            <div className="settings-section-title">{t(section.title)}</div>
+            <div
+              className={
+                isLlmProviders ? "provider-keys-grid" : undefined
+              }
+            >
+              {section.items.map((field) => (
+                <div
+                  key={field.key}
+                  className={
+                    isLlmProviders ? "provider-key-card" : "settings-field"
                   }
-                  value={env[field.key] || ""}
-                  onChange={(e) => handleChange(field.key, e.target.value)}
-                  onBlur={() => handleBlur(field.key)}
-                  placeholder={t(field.label)}
-                />
-                {field.type === "password" && (
-                  <button
-                    className="btn-ghost settings-toggle-btn"
-                    onClick={() => toggleVisibility(field.key)}
-                  >
-                    {visibleKeys.has(field.key)
-                      ? t("common.hide")
-                      : t("common.show")}
-                  </button>
-                )}
-              </div>
-              <div className="settings-field-hint">{t(field.hint)}</div>
+                >
+                  {isLlmProviders && (
+                    <div className="provider-key-card-head">
+                      <BrandLogo provider={field.key} size={22} />
+                      <span className="provider-key-card-title">
+                        {t(field.label)}
+                      </span>
+                      {savedKey === field.key && (
+                        <span className="settings-saved">
+                          {t("common.saved")}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {!isLlmProviders && (
+                    <label className="settings-field-label">
+                      {t(field.label)}
+                      {savedKey === field.key && (
+                        <span className="settings-saved">
+                          {t("common.saved")}
+                        </span>
+                      )}
+                    </label>
+                  )}
+                  <div className="settings-input-row">
+                    <input
+                      className="input"
+                      type={
+                        field.type === "password" && !visibleKeys.has(field.key)
+                          ? "password"
+                          : "text"
+                      }
+                      value={env[field.key] || ""}
+                      onChange={(e) => handleChange(field.key, e.target.value)}
+                      onBlur={() => handleBlur(field.key)}
+                      placeholder={t(field.label)}
+                    />
+                    {field.type === "password" && (
+                      <button
+                        className="btn-ghost settings-toggle-btn"
+                        onClick={() => toggleVisibility(field.key)}
+                      >
+                        {visibleKeys.has(field.key)
+                          ? t("common.hide")
+                          : t("common.show")}
+                      </button>
+                    )}
+                  </div>
+                  <div className="settings-field-hint">{t(field.hint)}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      ))}
+          </div>
+        );
+      })}
     </div>
   );
 }

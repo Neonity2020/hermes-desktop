@@ -75,6 +75,26 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Show diagnostics and debug info",
     category: "agent",
   },
+  {
+    name: "/goal",
+    description: "Lock the agent onto a persistent cross-turn goal (Ralph loop)",
+    category: "agent",
+  },
+  {
+    name: "/steer",
+    description: "Steer the in-flight agent without interrupting it",
+    category: "agent",
+  },
+  {
+    name: "/queue",
+    description: "Queue a follow-up to run after the current turn",
+    category: "agent",
+  },
+  {
+    name: "/update",
+    description: "Update Hermes to the latest version",
+    category: "agent",
+  },
   // Tools & capabilities
   { name: "/web", description: "Search the web", category: "tools" },
   { name: "/image", description: "Generate an image", category: "tools" },
@@ -90,6 +110,21 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   },
   { name: "/tools", description: "List available tools", category: "info" },
   { name: "/skills", description: "List installed skills", category: "info" },
+  {
+    name: "/reload-skills",
+    description: "Reload the skills directory without restarting",
+    category: "info",
+  },
+  {
+    name: "/kanban",
+    description: "List or operate on kanban tasks",
+    category: "info",
+  },
+  {
+    name: "/curator",
+    description: "Show curator status (usage-ranked skills)",
+    category: "info",
+  },
   {
     name: "/model",
     description: "Show or switch the current model",

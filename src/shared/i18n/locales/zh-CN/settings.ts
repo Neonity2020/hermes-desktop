@@ -14,7 +14,8 @@ export default {
   language: {
     label: "语言",
     english: "English",
-    indonesian: "å°å°¼è¯­",
+    indonesian: "印尼语",
+    japanese: "日本語",
     spanish: "Español",
     chinese: "中文",
     portuguese: "葡萄牙语",
@@ -22,6 +23,7 @@ export default {
   },
   notDetected: "未检测到",
   updatedSuccessfully: "更新成功！",
+  updateSuccess: "Hermes 更新成功。",
   updateFailed: "更新失败。",
   version: "v{{version}}",
   proxyPlaceholder: "例如:socks5://127.0.0.1:1080 或 http://proxy:8080",

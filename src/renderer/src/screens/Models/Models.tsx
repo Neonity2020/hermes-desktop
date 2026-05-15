@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, Trash, Search, X } from "../../assets/icons";
 import { PROVIDERS } from "../../constants";
 import { useI18n } from "../../components/useI18n";
+import BrandLogo from "../../components/common/BrandLogo";
 
 interface SavedModel {
   id: string;
@@ -199,7 +200,10 @@ function Models(): React.JSX.Element {
               onClick={() => openEditModal(m)}
             >
               <div className="models-card-header">
-                <div className="models-card-name">{m.name}</div>
+                <div className="models-card-title">
+                  <BrandLogo provider={m.provider} modelId={m.model} size={20} />
+                  <div className="models-card-name">{m.name}</div>
+                </div>
                 <span className="models-card-provider">
                   {t(providerLabelKey(m.provider))}
                 </span>

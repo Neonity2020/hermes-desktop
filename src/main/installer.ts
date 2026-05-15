@@ -14,6 +14,7 @@ import { getModelConfig, getConnectionConfig } from "./config";
 import { profileHome, stripAnsi } from "./utils";
 import { setupAskpass, AskpassHandle } from "./askpass";
 import { precacheSudoCredentials } from "./sudoCreds";
+import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -235,6 +236,7 @@ export async function verifyInstall(): Promise<boolean> {
           HERMES_HOME,
         },
         timeout: 15000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
       (error) => {
         const ok = !error;
@@ -277,6 +279,7 @@ export async function getHermesVersion(): Promise<string | null> {
           HERMES_HOME,
         },
         timeout: 15000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
       (error, stdout) => {
         _versionFetching = false;
@@ -310,6 +313,7 @@ export function runHermesDoctor(): string {
       },
       stdio: ["ignore", "pipe", "pipe"],
       timeout: 30000,
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
     return stripAnsi(output.toString());
   } catch (err) {
@@ -369,6 +373,7 @@ export async function runClawMigrate(
         TERM: "dumb",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
 
     proc.stdout?.on("data", (data: Buffer) => {
@@ -426,6 +431,7 @@ export async function runHermesUpdate(
         TERM: "dumb",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      ...HIDDEN_SUBPROCESS_OPTIONS,
     });
 
     proc.stdout?.on("data", (data: Buffer) => {
@@ -603,6 +609,7 @@ export async function runInstall(
           ...(askpass?.env ?? {}),
         },
         stdio: ["ignore", "pipe", "pipe"],
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       });
 
       proc.stdout?.on("data", (data: Buffer) => {
@@ -741,7 +748,7 @@ async function runInstallWindows(emit: (t: string) => void): Promise<void> {
           NO_COLOR: "1",
         },
         stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
     );
 
@@ -823,6 +830,7 @@ export async function runHermesBackup(
           TERM: "dumb",
         },
         timeout: 120000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
       (error, stdout, stderr) => {
         if (error) {
@@ -871,6 +879,7 @@ export async function runHermesImport(
           TERM: "dumb",
         },
         timeout: 120000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
       (error, _stdout, stderr) => {
         if (error) {
@@ -908,6 +917,7 @@ export function runHermesDump(): Promise<string> {
           TERM: "dumb",
         },
         timeout: 30000,
+        ...HIDDEN_SUBPROCESS_OPTIONS,
       },
       (error, stdout, stderr) => {
         if (error) {

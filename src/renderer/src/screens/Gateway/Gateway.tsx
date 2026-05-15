@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { GATEWAY_SECTIONS, GATEWAY_PLATFORMS } from "../../constants";
 import { useI18n } from "../../components/useI18n";
+import BrandLogo from "../../components/common/BrandLogo";
 
 function Gateway({ profile }: { profile?: string }): React.JSX.Element {
   const { t } = useI18n();
@@ -136,13 +137,16 @@ function Gateway({ profile }: { profile?: string }): React.JSX.Element {
         {GATEWAY_PLATFORMS.map((platform) => (
           <div key={platform.key} className="settings-platform-card">
             <div className="settings-platform-header">
-              <div className="settings-platform-info">
-                <span className="settings-platform-label">
-                  {t(platform.label)}
-                </span>
-                <span className="settings-platform-desc">
-                  {t(platform.description)}
-                </span>
+              <div className="settings-platform-left">
+                <BrandLogo provider={platform.key} size={28} />
+                <div className="settings-platform-info">
+                  <span className="settings-platform-label">
+                    {t(platform.label)}
+                  </span>
+                  <span className="settings-platform-desc">
+                    {t(platform.description)}
+                  </span>
+                </div>
               </div>
               <label className="tools-toggle">
                 <input
