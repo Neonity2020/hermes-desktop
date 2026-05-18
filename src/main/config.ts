@@ -242,6 +242,118 @@ export function setConfigValue(
   safeWriteFile(configFile, content);
 }
 
+/**
+ * Locate the direct children of a top-level YAML block. Each child is
+ * keyed by name and carries the substring offsets needed to read or
+ * rewrite its value in-place.
+ *
+ * Why this exists: the model-field readers/writers used to run loose
+ * regexes like `^\s*default:` against the whole file, which match any
+ * `default:` at any indent — so a `personalities.default` description
+ * would be picked up as the model name (issue #242), and toggling the
+ * model in the UI would overwrite that personality string instead of
+ * `model.default`. Scoping reads and writes to a named top-level block
+ * fixes both directions.
+ *
+ * Direct (sibling) children only: keys nested deeper than one indent
+ * under the block are ignored. The block ends at the first non-indented,
+ * non-empty line — the next top-level key. Anchored block-header search
+ * means a `model:` later in some other context (e.g. a YAML string
+ * literal, or nested under another block) won't be mistaken for the
+ * top-level `model:` we want.
+ */
+interface BlockChild {
+  key: string;
+  /** Parsed value, with surrounding single/double quotes stripped. */
+  value: string;
+  /** Indent string of this child's line (e.g. "  "). */
+  indent: string;
+  /** Absolute offset of the substring after `key: ` and any leading
+   *  whitespace — where a writer should splice the new value. */
+  valueStart: number;
+  /** Absolute offset just past the substring the writer should replace
+   *  (excludes any trailing comment so we don't clobber `# notes`). */
+  valueEnd: number;
+}
+
+function readTopLevelBlock(
+  content: string,
+  blockName: string,
+): {
+  children: Map<string, BlockChild>;
+  blockBodyStart: number | null;
+  childIndent: string;
+} {
+  const startRe = new RegExp(`^${escapeRegex(blockName)}:[ \\t]*\\r?\\n`, "m");
+  const start = content.match(startRe);
+  if (!start || start.index === undefined) {
+    return { children: new Map(), blockBodyStart: null, childIndent: "  " };
+  }
+
+  const blockBodyStart = start.index + start[0].length;
+  const children = new Map<string, BlockChild>();
+  let firstChildIndent: string | null = null;
+  let cursor = blockBodyStart;
+
+  while (cursor < content.length) {
+    const lineEnd = content.indexOf("\n", cursor);
+    const lineEndExclusive = lineEnd === -1 ? content.length : lineEnd;
+    const line = content.slice(cursor, lineEndExclusive);
+
+    // Stop at a non-indented, non-empty line (= next top-level key).
+    if (line.trim() !== "" && !/^\s/.test(line)) break;
+
+    const m = line.match(
+      /^([ \t]+)([A-Za-z_][A-Za-z0-9_-]*):([ \t]*)([^\n#]*?)([ \t]*)(#.*)?$/,
+    );
+    if (m) {
+      const indent = m[1];
+      const key = m[2];
+      const gapBeforeValue = m[3];
+      const rawValue = m[4];
+      const trailingWhitespace = m[5];
+      void trailingWhitespace; // not used for replacement boundaries
+
+      // First child encountered sets the canonical indent. Anything more
+      // indented is a nested child (skip); anything less is malformed.
+      if (firstChildIndent === null) firstChildIndent = indent;
+      if (indent === firstChildIndent && !children.has(key)) {
+        const keyEnd = cursor + indent.length + key.length + 1; // past `:`
+        const valueStart = keyEnd + gapBeforeValue.length;
+        const valueEnd = valueStart + rawValue.length;
+        children.set(key, {
+          key,
+          value: stripYamlQuotes(rawValue),
+          indent,
+          valueStart,
+          valueEnd,
+        });
+      }
+    }
+
+    cursor =
+      lineEndExclusive === content.length ? content.length : lineEndExclusive + 1;
+  }
+
+  return {
+    children,
+    blockBodyStart,
+    childIndent: firstChildIndent ?? "  ",
+  };
+}
+
+function stripYamlQuotes(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
 export function getModelConfig(profile?: string): {
   provider: string;
   model: string;
@@ -260,19 +372,60 @@ export function getModelConfig(profile?: string): {
   if (!existsSync(configFile)) return defaults;
 
   const content = readFileSync(configFile, "utf-8");
-
-  const providerMatch = content.match(/^\s*provider:\s*["']?([^"'\n#]+)["']?/m);
-  const modelMatch = content.match(/^\s*default:\s*["']?([^"'\n#]+)["']?/m);
-  const baseUrlMatch = content.match(/^\s*base_url:\s*["']?([^"'\n#]+)["']?/m);
+  const { children } = readTopLevelBlock(content, "model");
 
   const result = {
-    provider: providerMatch ? providerMatch[1].trim() : defaults.provider,
-    model: modelMatch ? modelMatch[1].trim() : defaults.model,
-    baseUrl: baseUrlMatch ? baseUrlMatch[1].trim() : defaults.baseUrl,
+    provider: children.get("provider")?.value || defaults.provider,
+    model: children.get("default")?.value || defaults.model,
+    baseUrl: children.get("base_url")?.value || defaults.baseUrl,
   };
 
   setCache(cacheKey, result);
   return result;
+}
+
+/**
+ * Replace a direct child's value inside a top-level YAML block in-place,
+ * preserving the key's surrounding whitespace and any trailing comment.
+ * When the child doesn't exist, insert it as the first sibling at the
+ * block's existing indent. When the block itself doesn't exist, append
+ * one with the new key inside.
+ */
+function upsertBlockChild(
+  content: string,
+  blockName: string,
+  key: string,
+  value: string,
+): string {
+  const { children, blockBodyStart, childIndent } = readTopLevelBlock(
+    content,
+    blockName,
+  );
+
+  const existing = children.get(key);
+  if (existing) {
+    return (
+      content.slice(0, existing.valueStart) +
+      `"${value}"` +
+      content.slice(existing.valueEnd)
+    );
+  }
+
+  if (blockBodyStart !== null) {
+    const insertion = `${childIndent}${key}: "${value}"\n`;
+    return (
+      content.slice(0, blockBodyStart) +
+      insertion +
+      content.slice(blockBodyStart)
+    );
+  }
+
+  // No block at all → append one. Match the existing file's trailing
+  // newline conventions; if the file is empty (e.g. setModelConfig is
+  // bootstrapping a fresh config.yaml) skip the separator so we don't
+  // leave a stray leading blank line.
+  const sep = content === "" || content.endsWith("\n") ? "" : "\n";
+  return `${content}${sep}${blockName}:\n  ${key}: "${value}"\n`;
 }
 
 export function setModelConfig(
@@ -283,29 +436,23 @@ export function setModelConfig(
 ): void {
   invalidateCache(`mc:${profile || "default"}`);
   const { configFile } = profilePaths(profile);
-  if (!existsSync(configFile)) return;
 
-  let content = readFileSync(configFile, "utf-8");
+  // Bootstrap an empty config.yaml when it's missing — previously this
+  // function early-returned, so users on a custom HERMES_HOME where the
+  // file hadn't been created (issue #228) had their model selection
+  // silently dropped: the desktop appeared to save it but config.yaml
+  // never got written, and the Python gateway saw an empty model and
+  // returned 404s. `safeWriteFile` (used below) will create parent dirs
+  // as needed; `upsertBlockChild` produces a valid minimal YAML doc
+  // from an empty starting string.
+  let content = existsSync(configFile)
+    ? readFileSync(configFile, "utf-8")
+    : "";
 
-  const providerRegex = /^(\s*provider:\s*)["']?[^"'\n#]*["']?/m;
-  if (providerRegex.test(content)) {
-    content = content.replace(providerRegex, `$1"${provider}"`);
-  }
-
-  const modelRegex = /^(\s*default:\s*)["']?[^"'\n#]*["']?/m;
-  if (modelRegex.test(content)) {
-    content = content.replace(modelRegex, `$1"${model}"`);
-  }
-
-  const baseUrlRegex = /^(\s*base_url:\s*)["']?[^"'\n#]*["']?/m;
-  if (baseUrlRegex.test(content)) {
-    content = content.replace(baseUrlRegex, `$1"${baseUrl}"`);
-  } else if (baseUrl && provider !== "auto") {
-    // Append base_url line after the provider line in the model section
-    content = content.replace(
-      /^(\s*provider:\s*"[^"]*"\s*\n)/m,
-      `$1  base_url: "${baseUrl}"\n`,
-    );
+  content = upsertBlockChild(content, "model", "provider", provider);
+  content = upsertBlockChild(content, "model", "default", model);
+  if (baseUrl) {
+    content = upsertBlockChild(content, "model", "base_url", baseUrl);
   }
 
   // Disable smart_model_routing
