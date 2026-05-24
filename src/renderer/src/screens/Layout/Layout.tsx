@@ -1,5 +1,9 @@
 import { useState, useCallback, useEffect } from "react";
 import Chat, { ChatMessage } from "../Chat/Chat";
+import {
+  dbItemsToChatMessages,
+  type DbHistoryItem,
+} from "../Chat/sessionHistory";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
 import Settings from "../Settings/Settings";
@@ -194,62 +198,10 @@ function Layout({
 
   const handleResumeSession = useCallback(
     async (sessionId: string) => {
-      const items = await window.hermesAPI.getSessionMessages(sessionId);
-      const chatMessages: ChatMessage[] = items
-        .map((it): ChatMessage | null => {
-          switch (it.kind) {
-            case "user":
-              return {
-                id: `db-${it.id}`,
-                role: "user",
-                content: it.content,
-                ...(it.attachments && it.attachments.length > 0
-                  ? { attachments: it.attachments }
-                  : {}),
-              };
-            case "assistant":
-              return {
-                id: `db-${it.id}`,
-                role: "agent",
-                content: it.content,
-                ...(it.attachments && it.attachments.length > 0
-                  ? { attachments: it.attachments }
-                  : {}),
-              };
-            case "reasoning":
-              return {
-                id: `db-r-${it.id}`,
-                kind: "reasoning",
-                role: "agent",
-                text: it.text,
-              };
-            case "tool_call":
-              return {
-                id: `db-tc-${it.id}-${it.callId || "x"}`,
-                kind: "tool_call",
-                role: "agent",
-                callId: it.callId,
-                name: it.name,
-                args: it.args,
-              };
-            case "tool_result":
-              return {
-                id: `db-tr-${it.id}`,
-                kind: "tool_result",
-                role: "agent",
-                callId: it.callId,
-                name: it.name,
-                content: it.content,
-                ...(it.attachments && it.attachments.length > 0
-                  ? { attachments: it.attachments }
-                  : {}),
-              };
-            default:
-              return null;
-          }
-        })
-        .filter((m): m is ChatMessage => m !== null);
-      setMessages(chatMessages);
+      const items = (await window.hermesAPI.getSessionMessages(
+        sessionId,
+      )) as DbHistoryItem[];
+      setMessages(dbItemsToChatMessages(items));
       setCurrentSessionId(sessionId);
       goTo("chat");
     },

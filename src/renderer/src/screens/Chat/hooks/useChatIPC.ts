@@ -1,5 +1,10 @@
 import { useEffect } from "react";
 import type { ChatMessage, UsageState } from "../types";
+import {
+  dbItemsToChatMessages,
+  reconcileStreamedWithDb,
+  type DbHistoryItem,
+} from "../sessionHistory";
 
 interface UseChatIPCArgs {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -86,10 +91,33 @@ export function useChatIPC({
       });
     });
 
-    const cleanupDone = window.hermesAPI.onChatDone((sessionId) => {
+    const cleanupDone = window.hermesAPI.onChatDone(async (sessionId) => {
       if (sessionId) setHermesSessionId(sessionId);
       setToolProgress(null);
       setIsLoading(false);
+      // End-of-stream merge from state.db. The gateway doesn't forward
+      // streaming reasoning_content / tool deltas over the OpenAI-compatible
+      // SSE (NousResearch/hermes-agent#30449) — the agent writes them to
+      // state.db at finalisation instead. Without this merge, the
+      // reasoning / tool bubbles only materialise when something else
+      // triggers a re-sync (window focus change, tab switch). Doing it
+      // here makes them appear immediately on stream completion (#352).
+      //
+      // We *merge* (not replace) so that once #30449 lands and reasoning
+      // does stream, the already-rendered streamed bubble keeps its
+      // React identity instead of being re-mounted by a DB-id swap.
+      // `reconcileStreamedWithDb` does the matching — see its doc block.
+      if (!sessionId) return;
+      try {
+        const items = (await window.hermesAPI.getSessionMessages(
+          sessionId,
+        )) as DbHistoryItem[];
+        const dbMessages = dbItemsToChatMessages(items);
+        if (dbMessages.length === 0) return;
+        setMessages((prev) => reconcileStreamedWithDb(prev, dbMessages));
+      } catch {
+        // Merge is a UX nicety — don't break the chat flow if it fails.
+      }
     });
 
     const cleanupError = window.hermesAPI.onChatError((error) => {
