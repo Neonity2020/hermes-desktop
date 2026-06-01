@@ -190,7 +190,7 @@ describe("CLI fallback session id propagation", () => {
   });
 
   afterEach(() => {
-    stopGateway(true);
+    stopGateway(undefined, true);
     stopHealthPolling();
     spawned.length = 0;
   });
