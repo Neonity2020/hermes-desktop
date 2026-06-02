@@ -1002,6 +1002,18 @@ const hermesAPI = {
     Array<{ name: string; type: string; enabled: boolean; detail: string }>
   > => ipcRenderer.invoke("list-mcp-servers", profile),
 
+  // Discover marketplace (community registry)
+  fetchRegistry: (force?: boolean) =>
+    ipcRenderer.invoke("registry-fetch", force),
+  listInstalledRegistry: (profile?: string) =>
+    ipcRenderer.invoke("registry-list-installed", profile),
+  installRegistryItem: (
+    kind: string,
+    item: unknown,
+    profile?: string,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("registry-install", kind, item, profile),
+
   // Log viewer
   readLogs: (
     logFile?: string,

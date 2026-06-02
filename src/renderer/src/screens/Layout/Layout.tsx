@@ -6,6 +6,7 @@ import {
 } from "../Chat/sessionHistory";
 import Sessions from "../Sessions/Sessions";
 import Agents from "../Agents/Agents";
+import Discover from "../Discover/Discover";
 import ProfileSwitcher from "./ProfileSwitcher";
 import Settings from "../Settings/Settings";
 import Skills from "../Skills/Skills";
@@ -23,6 +24,7 @@ import hermeslogo from "../../assets/hermes.png";
 import {
   ChatBubble,
   Clock,
+  Compass,
   Settings as SettingsIcon,
   Puzzle,
   Brain,
@@ -41,6 +43,7 @@ import { useI18n } from "../../components/useI18n";
 type View =
   | "chat"
   | "sessions"
+  | "discover"
   | "agents"
   | "office"
   | "models"
@@ -56,6 +59,7 @@ type View =
 const NAV_ITEMS: { view: View; icon: LucideIcon; labelKey: string }[] = [
   { view: "chat", icon: ChatBubble, labelKey: "navigation.chat" },
   { view: "sessions", icon: Clock, labelKey: "navigation.sessions" },
+  { view: "discover", icon: Compass, labelKey: "navigation.discover" },
   // "agents" (Profiles) is reached from the sidebar-footer ProfileSwitcher's
   // "Manage profiles" action rather than a top-level nav item.
   { view: "office", icon: Building, labelKey: "navigation.office" },
@@ -311,6 +315,16 @@ function Layout({
                 currentSessionId={currentSessionId}
                 visible={view === "sessions"}
               />
+            )}
+          </div>
+        )}
+
+        {visitedViews.has("discover") && (
+          <div style={paneStyle("discover")}>
+            {remoteMode ? (
+              <RemoteNotice feature="Discover" />
+            ) : (
+              <Discover profile={activeProfile} visible={view === "discover"} />
             )}
           </div>
         )}

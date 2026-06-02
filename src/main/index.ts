@@ -140,6 +140,13 @@ import {
 import { readSoul, writeSoul, resetSoul } from "./soul";
 import { getToolsets, setToolsetEnabled } from "./tools";
 import {
+  fetchRegistry,
+  listInstalledRegistry,
+  installRegistryItem,
+  type RegistryKind,
+  type RegistryItem,
+} from "./registry";
+import {
   listInstalledSkills,
   listBundledSkills,
   getSkillContent,
@@ -1682,6 +1689,19 @@ function setupIPC(): void {
   // MCP servers
   ipcMain.handle("list-mcp-servers", (_event, profile?: string) =>
     listMcpServers(profile),
+  );
+
+  // Discover marketplace (community registry)
+  ipcMain.handle("registry-fetch", (_event, force?: boolean) =>
+    fetchRegistry(!!force),
+  );
+  ipcMain.handle("registry-list-installed", (_event, profile?: string) =>
+    listInstalledRegistry(profile),
+  );
+  ipcMain.handle(
+    "registry-install",
+    (_event, kind: RegistryKind, item: RegistryItem, profile?: string) =>
+      installRegistryItem(kind, item, profile),
   );
 
   // Memory providers

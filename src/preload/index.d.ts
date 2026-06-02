@@ -1,5 +1,10 @@
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
+import type {
+  RegistryKind,
+  RegistryItem,
+  RegistryCatalog,
+} from "../shared/registry";
 
 interface ElectronAPI {
   process: {
@@ -835,6 +840,19 @@ interface HermesAPI {
   ) => Promise<
     Array<{ name: string; type: string; enabled: boolean; detail: string }>
   >;
+
+  // Discover marketplace (community registry)
+  fetchRegistry: (
+    force?: boolean,
+  ) => Promise<RegistryCatalog & { error?: string }>;
+  listInstalledRegistry: (
+    profile?: string,
+  ) => Promise<{ skills: string[]; mcps: string[]; workflows: string[] }>;
+  installRegistryItem: (
+    kind: RegistryKind,
+    item: RegistryItem,
+    profile?: string,
+  ) => Promise<{ success: boolean; error?: string }>;
 
   // Log viewer
   readLogs: (

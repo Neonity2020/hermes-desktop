@@ -1,0 +1,65 @@
+{
+  "_comment": "Schema for the hermes-registry repo. Place this as registry.json at the repo root (branch: main). The Discover tab fetches it from https://raw.githubusercontent.com/fathah/hermes-registry/main/registry.json. Every item needs a unique `id` within its kind; everything else is optional but improves the card.",
+
+  "skills": [
+    {
+      "id": "official/dev/code-review",
+      "name": "Code Review",
+      "description": "Reviews a diff for bugs and cleanups.",
+      "author": "hermes",
+      "category": "dev",
+      "tags": ["review", "quality"],
+      "homepage": "https://github.com/fathah/hermes-registry",
+      "source": "official/dev/code-review"
+    }
+  ],
+
+  "mcps": [
+    {
+      "id": "github",
+      "name": "GitHub MCP",
+      "description": "Issues, PRs, and repo browsing over MCP.",
+      "author": "modelcontextprotocol",
+      "tags": ["git", "github"],
+      "transport": "http",
+      "config": {
+        "url": "https://api.githubcopilot.com/mcp/",
+        "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }
+      }
+    },
+    {
+      "id": "filesystem",
+      "name": "Filesystem MCP",
+      "description": "Local filesystem access over stdio.",
+      "transport": "stdio",
+      "config": {
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
+        "env": {}
+      }
+    }
+  ],
+
+  "agents": [
+    {
+      "id": "financial_analyst",
+      "name": "Financial Analyst",
+      "description": "A profile tuned for financial analysis tasks.",
+      "author": "community",
+      "model": "kimi-k2.6",
+      "provider": "moonshot",
+      "tags": ["finance"]
+    }
+  ],
+
+  "workflows": [
+    {
+      "id": "weekly-report",
+      "name": "Weekly Report",
+      "description": "Generates a weekly status report from recent sessions.",
+      "author": "community",
+      "tags": ["reporting"],
+      "scriptPath": "workflows/weekly-report.js"
+    }
+  ]
+}
