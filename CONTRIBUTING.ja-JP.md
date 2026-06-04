@@ -62,7 +62,7 @@ PR は小さく目的を絞ってください — その方がレビューもマ
 
 ## バグ報告
 
-バグを見つけた場合は、以下の情報を添えて [Issue を作成してください](https://github.com/NousResearch/hermes-desktop/issues/new)。
+バグを見つけた場合は、以下の情報を添えて [Issue を作成してください](https://github.com/fathah/hermes-desktop/issues/new)。
 
 - 明確なタイトルと説明
 - 再現手順
@@ -71,7 +71,7 @@ PR は小さく目的を絞ってください — その方がレビューもマ
 
 ## 機能リクエスト
 
-アイデアがある場合は、[Issue を作成して](https://github.com/NousResearch/hermes-desktop/issues/new)以下を記述してください。
+アイデアがある場合は、[Issue を作成して](https://github.com/fathah/hermes-desktop/issues/new)以下を記述してください。
 
 - 解決したい問題
 - どのように動作してほしいか

@@ -62,7 +62,7 @@
 
 ## 报告 Bug
 
-如果你发现了 bug，请在 GitHub 上 [提交 issue](https://github.com/NousResearch/hermes-desktop/issues/new)，并尽量包含：
+如果你发现了 bug，请在 GitHub 上 [提交 issue](https://github.com/fathah/hermes-desktop/issues/new)，并尽量包含：
 
 - 清晰的标题和描述
 - 复现步骤
@@ -71,7 +71,7 @@
 
 ## 功能请求
 
-如果你有新想法，也欢迎 [提交 issue](https://github.com/NousResearch/hermes-desktop/issues/new)，并描述：
+如果你有新想法，也欢迎 [提交 issue](https://github.com/fathah/hermes-desktop/issues/new)，并描述：
 
 - 你想解决的问题
 - 你希望它如何工作

@@ -259,7 +259,7 @@ Hermes 的相关文件统一管理于以下目录：
 
 ## 参与贡献
 
-欢迎大家参与贡献！查看 [参与贡献指南 (Contributing Guide)](CONTRIBUTING.md) 以开始。如果您不知从何入手，可以看一看 [开启的 Issues](https://github.com/NousResearch/hermes-desktop/issues)。发现了 Bug 或是对功能有新的需求？ [提交一个 Issue](https://github.com/NousResearch/hermes-desktop/issues/new)。
+欢迎大家参与贡献！查看 [参与贡献指南 (Contributing Guide)](CONTRIBUTING.md) 以开始。如果您不知从何入手，可以看一看 [开启的 Issues](https://github.com/fathah/hermes-desktop/issues)。发现了 Bug 或是对功能有新的需求？ [提交一个 Issue](https://github.com/fathah/hermes-desktop/issues/new)。
 
 ## 相关项目
 

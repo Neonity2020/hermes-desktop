@@ -259,7 +259,7 @@ Hermes のファイルは以下の場所で管理されます。
 
 ## コントリビューション
 
-コントリビューションを歓迎します！始め方は[コントリビューションガイド](CONTRIBUTING.md)をご覧ください。どこから手を付ければよいか分からない場合は、[Open Issues](https://github.com/NousResearch/hermes-desktop/issues) を確認してください。バグを見つけた、または機能要望がある場合は [Issue を作成してください](https://github.com/NousResearch/hermes-desktop/issues/new)。
+コントリビューションを歓迎します！始め方は[コントリビューションガイド](CONTRIBUTING.md)をご覧ください。どこから手を付ければよいか分からない場合は、[Open Issues](https://github.com/fathah/hermes-desktop/issues) を確認してください。バグを見つけた、または機能要望がある場合は [Issue を作成してください](https://github.com/fathah/hermes-desktop/issues/new)。
 
 ## 関連プロジェクト
 
