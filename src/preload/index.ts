@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
+import type { ChatToolEvent } from "../shared/chat-stream";
 
 /**
  * Mirror of the renderer-side `CredentialPoolEntry` ambient type
@@ -397,6 +398,17 @@ const hermesAPI = {
       callback(tool);
     ipcRenderer.on("chat-tool-progress", handler);
     return () => ipcRenderer.removeListener("chat-tool-progress", handler);
+  },
+
+  onChatToolEvent: (
+    callback: (event: ChatToolEvent) => void,
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      toolEvent: ChatToolEvent,
+    ): void => callback(toolEvent);
+    ipcRenderer.on("chat-tool-event", handler);
+    return () => ipcRenderer.removeListener("chat-tool-event", handler);
   },
 
   onChatUsage: (

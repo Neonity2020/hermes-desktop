@@ -5,6 +5,7 @@ import {
   reconcileStreamedWithDb,
   type DbHistoryItem,
 } from "../sessionHistory";
+import { upsertLiveToolEvent } from "../liveToolEvents";
 
 interface UseChatIPCArgs {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -137,6 +138,11 @@ export function useChatIPC({
       setToolProgress(tool);
     });
 
+    const cleanupToolEvent = window.hermesAPI.onChatToolEvent((toolEvent) => {
+      setToolProgress(null);
+      setMessages((prev) => upsertLiveToolEvent(prev, toolEvent));
+    });
+
     const cleanupUsage = window.hermesAPI.onChatUsage((u) => {
       setUsage((prev) => ({
         promptTokens: (prev?.promptTokens || 0) + u.promptTokens,
@@ -156,6 +162,7 @@ export function useChatIPC({
       cleanupDone();
       cleanupError();
       cleanupToolProgress();
+      cleanupToolEvent();
       cleanupUsage();
     };
   }, [

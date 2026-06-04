@@ -37,6 +37,7 @@ export interface ToolCallMessage {
   callId: string;
   name: string;
   args: string;
+  status?: "running" | "completed" | "failed";
 }
 
 export interface ToolResultMessage {

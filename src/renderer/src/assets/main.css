@@ -3330,6 +3330,198 @@ body {
   margin-bottom: 8px;
 }
 
+/* ── Grouped tool activity ─────────────────────────────────────────────
+ *
+ * A contiguous burst of tool calls/results folds into one collapsible
+ * block (ChatGPT/Claude style) instead of one bubble per call. The
+ * collapsed summary shows the most recent step; the run and each step
+ * expand smoothly via a grid-template-rows height transition.
+ */
+.chat-message-history > .chat-tool-group {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-tool-group {
+  width: 100%;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.18));
+  border-radius: 10px;
+  background: transparent;
+  overflow: hidden;
+}
+
+.chat-tool-group-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: var(--text-secondary);
+}
+
+.chat-tool-group-summary:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.06));
+}
+
+.chat-tool-group-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+
+.chat-tool-group-chevron--open {
+  transform: rotate(90deg);
+}
+
+.chat-tool-group-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.chat-tool-group-spinner {
+  flex-shrink: 0;
+  color: var(--info, #4aa8ff);
+  animation: spin 0.8s linear infinite;
+}
+
+.chat-tool-group-name {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.chat-tool-group-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-tool-group-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-tertiary, rgba(127, 127, 127, 0.1));
+  padding: 1px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* Smooth height animation without measuring: 0fr → 1fr collapses the row. */
+.chat-tool-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s ease;
+}
+
+.chat-tool-collapse--open {
+  grid-template-rows: 1fr;
+}
+
+.chat-tool-collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+
+.chat-tool-group-items {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border, rgba(127, 127, 127, 0.12));
+}
+
+/* ── A single step inside the group ──────────────────────────────────── */
+.chat-tool-item {
+  border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.08));
+}
+.chat-tool-item:last-child {
+  border-bottom: none;
+}
+
+.chat-tool-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px 6px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.chat-tool-item-header:hover {
+  background: var(--hover, rgba(127, 127, 127, 0.05));
+}
+
+.chat-tool-item-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.chat-tool-item-chevron--open {
+  transform: rotate(90deg);
+}
+
+.chat-tool-item-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+.chat-tool-item-dot--call {
+  background: var(--info, #4aa8ff);
+}
+.chat-tool-item-dot--result {
+  background: var(--success, #4ac38a);
+}
+.chat-tool-item-dot--failed {
+  background: var(--danger, #e5544b);
+}
+
+.chat-tool-item-kind {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.chat-tool-item-name {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--code-bg, rgba(127, 127, 127, 0.08));
+  padding: 1px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.chat-tool-item-detail {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-tool-item-body {
+  padding: 8px 12px 10px 32px;
+  background: var(--code-bg, rgba(127, 127, 127, 0.04));
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

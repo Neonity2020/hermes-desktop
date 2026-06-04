@@ -45,6 +45,11 @@ import { readModels } from "./models";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { type Attachment, escapeXmlAttr } from "../shared/attachments";
 import { URL_KEY_MAP, OPENAI_COMPAT_PROVIDERS } from "../shared/url-key-map";
+import {
+  chatToolEventFromPayload,
+  chatToolProgressLabel,
+  type ChatToolEvent,
+} from "../shared/chat-stream";
 
 /**
  * Resolve which profile a gateway call targets. An explicit profile always
@@ -337,6 +342,7 @@ export interface ChatCallbacks {
   onDone: (sessionId?: string) => void;
   onError: (error: string) => void;
   onToolProgress?: (tool: string) => void;
+  onToolEvent?: (event: ChatToolEvent) => void;
   onUsage?: (usage: {
     promptTokens: number;
     completionTokens: number;
@@ -615,12 +621,16 @@ function sendMessageViaApi(
 
   /** Handle a custom SSE event (non-data lines with `event:` prefix). */
   function processCustomEvent(eventType: string, data: string): void {
-    if (eventType === "hermes.tool.progress" && cb.onToolProgress) {
+    if (eventType === "hermes.tool.progress") {
       try {
-        const payload = JSON.parse(data);
-        const label = payload.label || payload.tool || "";
-        const emoji = payload.emoji || "";
-        cb.onToolProgress(emoji ? `${emoji} ${label}` : label);
+        const payload = JSON.parse(data) as Record<string, unknown>;
+        const toolEvent = chatToolEventFromPayload(payload);
+        if (cb.onToolEvent) {
+          cb.onToolEvent(toolEvent);
+        }
+        if (!cb.onToolEvent && cb.onToolProgress) {
+          cb.onToolProgress(chatToolProgressLabel(toolEvent));
+        }
       } catch {
         /* malformed — skip */
       }

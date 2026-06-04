@@ -936,6 +936,9 @@ function setupIPC(): void {
           onToolProgress: (tool) => {
             safeSend("chat-tool-progress", tool);
           },
+          onToolEvent: (toolEvent) => {
+            safeSend("chat-tool-event", toolEvent);
+          },
           onUsage: (usage) => {
             safeSend("chat-usage", usage);
           },
