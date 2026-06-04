@@ -524,6 +524,9 @@ export async function waitForClaw3dReady(
 export async function getClaw3dStatus(): Promise<Claw3dStatus> {
   const cloned = existsSync(join(HERMES_OFFICE_DIR, "package.json"));
   const installed = existsSync(join(HERMES_OFFICE_DIR, "node_modules"));
+  if (installed) {
+    writeClaw3dSettings();
+  }
   const port = getSavedPort();
   const devRunning = isDevServerRunning();
   // Only check port conflict when dev server is NOT running

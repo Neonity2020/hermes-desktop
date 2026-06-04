@@ -3,6 +3,8 @@ import { Refresh, ExternalLink, Settings } from "../../assets/icons";
 import { useI18n } from "../../components/useI18n";
 import { buildOfficeWebviewUrl } from "./officeUrl";
 
+const DEFAULT_WS_URL = "ws://localhost:18989";
+
 type OfficeState =
   | "checking"
   | "not-installed"
@@ -32,7 +34,7 @@ function Office({
   const [port, setPort] = useState(3000);
   const [portInput, setPortInput] = useState("3000");
   const [portInUse, setPortInUse] = useState(false);
-  const [wsUrlInput, setWsUrlInput] = useState("ws://localhost:18789");
+  const [wsUrlInput, setWsUrlInput] = useState(DEFAULT_WS_URL);
   const [error, setError] = useState("");
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState("");
@@ -70,7 +72,7 @@ function Office({
     setPort(status.port);
     setPortInput(String(status.port));
     setPortInUse(status.portInUse);
-    setWsUrlInput(status.wsUrl || "ws://localhost:18789");
+    setWsUrlInput(status.wsUrl || DEFAULT_WS_URL);
     if (status.error) setError(status.error);
     if (status.installed || status.remoteUrl) {
       setState("ready");
@@ -420,7 +422,7 @@ function Office({
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleWsUrlSave();
               }}
-              placeholder="ws://localhost:18789"
+              placeholder={DEFAULT_WS_URL}
             />
           </div>
           <button className="btn btn-secondary btn-sm" onClick={loadLogs}>
