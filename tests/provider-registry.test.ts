@@ -40,6 +40,9 @@ describe("provider-registry", () => {
       expect(canonicalProviderBaseUrl("openrouter")).toBe(
         "https://openrouter.ai/api/v1",
       );
+      expect(canonicalProviderBaseUrl("ollama-cloud")).toBe(
+        "https://ollama.com/v1",
+      );
     });
 
     it("returns default URLs for local OpenAI-compatible providers", () => {
@@ -94,6 +97,7 @@ describe("provider-registry", () => {
         "cerebras",
         "mistral",
         "xiaomi",
+        "ollama-cloud",
       ];
       for (const provider of requiredBuiltins) {
         expect(PROVIDER_BASE_URLS[provider]).toBeTruthy();

@@ -1,7 +1,42 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PROVIDERS } from "../../../constants";
+import { useDiscoveredModels } from "../../../hooks/useDiscoveredModels";
 import { useI18n } from "../../../components/useI18n";
 import type { ModelGroup } from "../types";
+
+const OLLAMA_CLOUD_PROVIDER = "ollama-cloud";
+const OLLAMA_CLOUD_BASE_URL = "https://ollama.com/v1";
+
+interface SavedModelForPicker {
+  provider: string;
+  model: string;
+  name: string;
+  baseUrl?: string;
+}
+
+function mergeLiveOllamaCloudModels(
+  savedModels: SavedModelForPicker[],
+  liveModels: string[],
+  liveStatus: string,
+): SavedModelForPicker[] {
+  if (liveStatus !== "ok" || liveModels.length === 0) {
+    return savedModels;
+  }
+
+  const liveEntries = Array.from(new Set(liveModels))
+    .sort()
+    .map((model) => ({
+      provider: OLLAMA_CLOUD_PROVIDER,
+      model,
+      name: `Ollama Cloud · ${model}`,
+      baseUrl: OLLAMA_CLOUD_BASE_URL,
+    }));
+
+  return [
+    ...savedModels.filter((model) => model.provider !== OLLAMA_CLOUD_PROVIDER),
+    ...liveEntries,
+  ];
+}
 
 interface UseModelConfigResult {
   currentModel: string;
@@ -17,9 +52,7 @@ interface UseModelConfigResult {
   ) => Promise<void>;
 }
 
-function groupModelsByProvider(
-  models: { provider: string; model: string; name: string; baseUrl?: string }[],
-): ModelGroup[] {
+function groupModelsByProvider(models: SavedModelForPicker[]): ModelGroup[] {
   const groupMap = new Map<string, ModelGroup>();
   for (const m of models) {
     if (!groupMap.has(m.provider)) {
@@ -45,6 +78,23 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   const [currentProvider, setCurrentProvider] = useState("auto");
   const [currentBaseUrl, setCurrentBaseUrl] = useState("");
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
+  const [savedModels, setSavedModels] = useState<SavedModelForPicker[]>([]);
+
+  const ollamaCloudDiscovery = useDiscoveredModels({
+    provider: OLLAMA_CLOUD_PROVIDER,
+    profile,
+    enabled: true,
+  });
+
+  const modelsForPicker = useMemo(
+    () =>
+      mergeLiveOllamaCloudModels(
+        savedModels,
+        ollamaCloudDiscovery.models,
+        ollamaCloudDiscovery.status,
+      ),
+    [savedModels, ollamaCloudDiscovery.models, ollamaCloudDiscovery.status],
+  );
 
   const reload = useCallback(async (): Promise<void> => {
     const [mc, savedModels] = await Promise.all([
@@ -54,7 +104,7 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
     setCurrentModel(mc.model);
     setCurrentProvider(mc.provider);
     setCurrentBaseUrl(mc.baseUrl);
-    setModelGroups(groupModelsByProvider(savedModels));
+    setSavedModels(savedModels);
   }, [profile]);
 
   // Initial load + reload whenever the profile changes (canonical
@@ -62,6 +112,10 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    setModelGroups(groupModelsByProvider(modelsForPicker));
+  }, [modelsForPicker]);
 
   const selectModel = useCallback(
     async (provider: string, model: string, baseUrl: string): Promise<void> => {
@@ -72,7 +126,8 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
       // endpoint) would route the request to the wrong host.  Drop the
       // baseUrl whenever the entry isn't `custom`; the gateway falls back
       // to the provider's canonical URL.
-      const effectiveBaseUrl = provider === "custom" ? baseUrl : "";
+      const effectiveBaseUrl =
+        provider === "custom" || provider === OLLAMA_CLOUD_PROVIDER ? baseUrl : "";
       await window.hermesAPI.setModelConfig(
         provider,
         model,

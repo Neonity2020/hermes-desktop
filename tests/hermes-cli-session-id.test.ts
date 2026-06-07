@@ -235,6 +235,7 @@ vi.mock("../src/main/installer", () => ({
 
 vi.mock("../src/main/config", () => ({
   getModelConfig: () => ({ model: "test-model", provider: "openrouter" }),
+  getConfigValue: () => "",
   readEnv: () => ({}),
   getApiServerKey: () => "",
   getConnectionConfig: () => ({ mode: "local" as const }),
