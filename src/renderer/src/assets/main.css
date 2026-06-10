@@ -1523,12 +1523,61 @@ body {
   }
 }
 
+.profile-menu-active-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 10px 14px;
+}
+
+.profile-menu-avatar {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.profile-menu-avatar-dot {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--success);
+  border: 2px solid var(--bg-secondary);
+}
+
+.profile-menu-active-section .profile-menu-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.profile-menu-active-section .profile-menu-meta {
+  font-size: 12px;
+}
+
+.profile-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
 .profile-menu-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  max-height: 320px;
+  max-height: 260px;
   overflow-y: auto;
+  padding-top: 4px;
 }
 
 .profile-menu-item {
