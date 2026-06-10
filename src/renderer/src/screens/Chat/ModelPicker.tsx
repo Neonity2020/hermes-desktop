@@ -41,14 +41,15 @@ export const ModelPicker = memo(function ModelPicker({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  const filteredGroups = searchInput.trim()
+  const searchQuery = searchInput.trim().toLowerCase();
+  const filteredGroups = searchQuery
     ? modelGroups
         .map((group) => ({
           ...group,
           models: group.models.filter(
             (m) =>
-              m.label.toLowerCase().includes(searchInput.toLowerCase()) ||
-              m.model.toLowerCase().includes(searchInput.toLowerCase()),
+              m.label.toLowerCase().includes(searchQuery) ||
+              m.model.toLowerCase().includes(searchQuery),
           ),
         }))
         .filter((group) => group.models.length > 0)
