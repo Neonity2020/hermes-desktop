@@ -38,16 +38,15 @@ export function initAnalytics(): void {
   if (initialized) return;
   if (!POSTHOG_KEY) {
     // No key configured — silently skip analytics
-    initialized = true;
     return;
   }
   if (!isAnalyticsEnabled()) {
-    initialized = true;
     return;
   }
 
   posthog.init(POSTHOG_KEY, {
     api_host: POSTHOG_HOST,
+    defaults: "2026-01-30",
     capture_pageview: false, // We handle manually for SPA
     capture_pageleave: false,
     disable_session_recording: true, // Privacy-first: no session recording
@@ -61,7 +60,7 @@ export function initAnalytics(): void {
     // be disabled server-side in the PostHog project settings
     // ("Discard IP data"). See:
     // https://posthog.com/tutorials/web-redact-properties#hiding-customer-ip-address
-    respect_dnt: true,
+    respect_dnt: import.meta.env.DEV ? false : true,
     mask_personal_data_properties: true,
     loaded: () => {
       posthog.identify(getOrCreateAnonymousId(), {
