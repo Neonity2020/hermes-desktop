@@ -25,6 +25,9 @@ pnpm-debug.log*
 # ESLint cache
 .eslintcache
 
+# Local isolated Hermes homes for development/tests
+.sandbox/
+
 # Electron packaging artifacts
 release/
 .claude/worktrees

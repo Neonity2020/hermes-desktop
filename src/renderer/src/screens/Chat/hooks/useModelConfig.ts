@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PROVIDERS } from "../../../constants";
 import { useDiscoveredModels } from "../../../hooks/useDiscoveredModels";
 import { useI18n } from "../../../components/useI18n";
@@ -79,6 +79,7 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   const [currentBaseUrl, setCurrentBaseUrl] = useState("");
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [savedModels, setSavedModels] = useState<SavedModelForPicker[]>([]);
+  const loadSeqRef = useRef(0);
 
   const ollamaCloudDiscovery = useDiscoveredModels({
     provider: OLLAMA_CLOUD_PROVIDER,
@@ -97,10 +98,12 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
   );
 
   const reload = useCallback(async (): Promise<void> => {
+    const seq = ++loadSeqRef.current;
     const [mc, savedModels] = await Promise.all([
       window.hermesAPI.getModelConfig(profile),
       window.hermesAPI.listModels(),
     ]);
+    if (seq !== loadSeqRef.current) return;
     setCurrentModel(mc.model);
     setCurrentProvider(mc.provider);
     setCurrentBaseUrl(mc.baseUrl);
@@ -117,8 +120,22 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
     setModelGroups(groupModelsByProvider(modelsForPicker));
   }, [modelsForPicker]);
 
+  useEffect(() => {
+    return window.hermesAPI.onConnectionConfigChanged(() => {
+      setModelGroups([]);
+      void reload();
+    });
+  }, [reload]);
+
+  useEffect(() => {
+    return window.hermesAPI.onModelLibraryChanged(() => {
+      void reload();
+    });
+  }, [reload]);
+
   const selectModel = useCallback(
     async (provider: string, model: string, baseUrl: string): Promise<void> => {
+      const seq = ++loadSeqRef.current;
       // Named providers (deepseek, groq, anthropic, …) have a hardcoded
       // canonical base_url in `hermes-agent`'s PROVIDER_REGISTRY.  A stored
       // model entry that carries a stale `baseUrl` from an earlier confused
@@ -128,17 +145,27 @@ export function useModelConfig(profile?: string): UseModelConfigResult {
       // to the provider's canonical URL.
       const effectiveBaseUrl =
         provider === "custom" || provider === OLLAMA_CLOUD_PROVIDER ? baseUrl : "";
-      await window.hermesAPI.setModelConfig(
-        provider,
-        model,
-        effectiveBaseUrl,
-        profile,
-      );
       setCurrentModel(model);
       setCurrentProvider(provider);
       setCurrentBaseUrl(effectiveBaseUrl);
+      try {
+        await window.hermesAPI.setModelConfig(
+          provider,
+          model,
+          effectiveBaseUrl,
+          profile,
+        );
+        const mc = await window.hermesAPI.getModelConfig(profile);
+        if (seq !== loadSeqRef.current) return;
+        setCurrentModel(mc.model);
+        setCurrentProvider(mc.provider);
+        setCurrentBaseUrl(mc.baseUrl);
+      } catch (err) {
+        if (seq === loadSeqRef.current) await reload();
+        throw err;
+      }
     },
-    [profile],
+    [profile, reload],
   );
 
   const displayModel = useMemo(

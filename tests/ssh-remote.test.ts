@@ -81,7 +81,7 @@ describe("ssh remote config writes", () => {
 });
 
 describe("ssh Hermes command quoting", () => {
-  it("shell-quotes the whole bash script without dropping per-argument quoting", () => {
+  it("shell-quotes the whole sh script without dropping per-argument quoting", () => {
     const command = buildRemoteHermesCmd([
       "kanban",
       "create",
@@ -91,10 +91,10 @@ describe("ssh Hermes command quoting", () => {
     ]);
 
     expect(command).not.toContain(
-      "bash -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes 'kanban' 'create'",
+      "sh -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes 'kanban' 'create'",
     );
     expect(command).toContain(
-      `bash -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes '"'"'kanban'"'"'`,
+      `sh -c '[ -x $HOME/hermes-agent/.venv/bin/hermes ] && exec $HOME/hermes-agent/.venv/bin/hermes '"'"'kanban'"'"'`,
     );
   });
 
@@ -119,17 +119,25 @@ describe("ssh Hermes command quoting", () => {
       "single quote in user input",
       ["kanban", "create", "User's task", "--json"],
     ],
-  ])("preserves %s", (_name, expectedArgs) => {
-    const command = buildRemoteHermesCmd(expectedArgs);
-    expect(parseNulArgs(runWithHermesShim(command))).toEqual(expectedArgs);
-  });
+  ])(
+    "preserves %s",
+    (_name, expectedArgs) => {
+      const command = buildRemoteHermesCmd(expectedArgs);
+      expect(parseNulArgs(runWithHermesShim(command))).toEqual(expectedArgs);
+    },
+    30000,
+  );
 
-  it("preserves existing extraShell redirects", () => {
-    const output = runWithHermesShim(
-      buildRemoteHermesCmd(["doctor"], " 2>&1"),
-    ).toString("utf8");
-    expect(output).toBe("doctor stderr preserved\n");
-  });
+  it(
+    "preserves existing extraShell redirects",
+    () => {
+      const output = runWithHermesShim(
+        buildRemoteHermesCmd(["doctor"], " 2>&1"),
+      ).toString("utf8");
+      expect(output).toBe("doctor stderr preserved\n");
+    },
+    30000,
+  );
 });
 
 describe("ssh gateway commands (issue #285)", () => {

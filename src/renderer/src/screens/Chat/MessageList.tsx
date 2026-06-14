@@ -73,7 +73,7 @@ export const MessageList = memo(function MessageList({
     () =>
       messages.filter((m) => {
         if (!isBubble(m)) return true;
-        return ((m.content as string) || "").trim().length > 0;
+        return !!m.error || ((m.content as string) || "").trim().length > 0;
       }),
     [messages],
   );
@@ -104,7 +104,7 @@ export const MessageList = memo(function MessageList({
       i--; // step back: the for-loop's i++ advances past the run
       rows.push(
         <ToolActivityGroup
-          key={group[0].id}
+          key={`${group[0].id}-${start}`}
           items={group}
           // Active (spinner) only while streaming and this run is trailing.
           active={isLoading && i === visibleMessages.length - 1}

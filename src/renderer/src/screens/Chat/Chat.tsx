@@ -14,11 +14,15 @@ import { useModelConfig } from "./hooks/useModelConfig";
 import { useFastMode } from "./hooks/useFastMode";
 import { useReasoningEffort } from "./hooks/useReasoningEffort";
 import { useLocalCommands } from "./hooks/useLocalCommands";
+import {
+  dashboardChatEnabledForConnection,
+  useDashboardChatTransport,
+} from "./hooks/useDashboardChatTransport";
 import { useI18n } from "../../components/useI18n";
 import { buildChatTranscript } from "./transcriptUtils";
 import { ConfigHealthBanner } from "../../components/ConfigHealthBanner";
 import type { Attachment } from "../../../../shared/attachments";
-import type { ChatMessage, UsageState } from "./types";
+import type { ActiveTurn, ChatMessage, UsageState } from "./types";
 import type { ContextUsage } from "./ContextGauge";
 import { contextWindowForModel } from "./contextWindows";
 import { QueuedMessages } from "./QueuedMessages";
@@ -100,6 +104,13 @@ function Chat({
   const [usage, setUsage] = useState<UsageState | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [remoteMode, setRemoteMode] = useState(false);
+  const [connectionMode, setConnectionMode] = useState<
+    "local" | "remote" | "ssh"
+  >("local");
+  const [chatTransportPreference, setChatTransportPreference] = useState<
+    "auto" | "dashboard" | "legacy"
+  >("auto");
+  const [connectionModeLoaded, setConnectionModeLoaded] = useState(false);
   // Working folder bound to this conversation (issue #27). Per-conversation,
   // held in memory; reset on session switch / new chat below.
   const [contextFolder, setContextFolder] = useState<string | null>(null);
@@ -110,15 +121,56 @@ function Chat({
   const chatInputRef = useRef<ChatInputHandle>(null);
   const queueRef = useRef<QueuedMessage[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const activeTurnRef = useRef<ActiveTurn | null>(null);
+  const dashboardChatEnabled = dashboardChatEnabledForConnection(
+    import.meta.env.VITE_HERMES_DESKTOP_DASHBOARD_CHAT,
+    connectionModeLoaded,
+    connectionMode,
+    chatTransportPreference,
+  );
 
   useEffect(() => {
     let cancelled = false;
-    (async (): Promise<void> => {
-      const flag = await window.hermesAPI.isRemoteMode();
-      if (!cancelled) setRemoteMode(flag);
-    })();
+    const loadConnectionConfig = async (): Promise<void> => {
+      try {
+        const conn = await window.hermesAPI.getConnectionConfig();
+        if (!cancelled) {
+          setConnectionMode(conn.mode);
+          setRemoteMode(conn.mode !== "local");
+          setChatTransportPreference(
+            conn.mode === "local"
+              ? "auto"
+              : conn.mode === "ssh"
+              ? conn.sshChatTransport ?? "auto"
+              : conn.remoteChatTransport ?? "auto",
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setConnectionMode("ssh");
+          setRemoteMode(true);
+          setChatTransportPreference("legacy");
+        }
+      } finally {
+        if (!cancelled) setConnectionModeLoaded(true);
+      }
+    };
+    void loadConnectionConfig();
+    const unsubscribe = window.hermesAPI.onConnectionConfigChanged((conn) => {
+      setConnectionModeLoaded(true);
+      setConnectionMode(conn.mode);
+      setRemoteMode(conn.mode !== "local");
+      setChatTransportPreference(
+        conn.mode === "local"
+          ? "auto"
+          : conn.mode === "ssh"
+          ? conn.sshChatTransport ?? "auto"
+          : conn.remoteChatTransport ?? "auto",
+      );
+    });
     return (): void => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
@@ -199,13 +251,18 @@ function Chat({
     modelConfig.currentBaseUrl,
   ]);
 
+  const visibleSessionScopeId =
+    messages.length === 0 ? null : hermesSessionId;
+
   useChatIPC({
     runId,
+    sessionScopeId: visibleSessionScopeId,
     setMessages,
     setHermesSessionId,
     setToolProgress,
     setIsLoading,
     setUsage,
+    activeTurnRef,
   });
 
   // No parent-driven reset effects: each run is its own <Chat key={runId}>
@@ -313,6 +370,7 @@ function Chat({
     setMessages([]);
     setHermesSessionId(null);
     setContextFolder(null);
+    activeTurnRef.current = null;
     setUsage(null);
     setToolProgress(null);
     queueRef.current = [];
@@ -328,6 +386,25 @@ function Chat({
     addAgentMessage,
   });
 
+  const dashboardTransport = useDashboardChatTransport({
+    activeTurnRef,
+    contextFolder,
+    connectionMode,
+    enabled: dashboardChatEnabled,
+    fallbackOnUnavailable: chatTransportPreference === "auto",
+    hermesSessionId,
+    messages,
+    model: modelConfig.currentModel,
+    modelBaseUrl: modelConfig.currentBaseUrl,
+    profile,
+    provider: modelConfig.currentProvider,
+    setHermesSessionId,
+    setIsLoading,
+    setMessages,
+    setToolProgress,
+    setUsage,
+  });
+
   const actions = useChatActions({
     runId,
     profile,
@@ -339,7 +416,14 @@ function Chat({
     onSessionStarted,
     chatInputRef,
     localCommands,
+    activeTurnRef,
     contextFolder,
+    sendViaDashboard: dashboardTransport.enabled
+      ? dashboardTransport.sendMessage
+      : undefined,
+    abortDashboard: dashboardTransport.enabled
+      ? dashboardTransport.abort
+      : undefined,
   });
 
   // Stable ref to handleSend so the drain effect doesn't re-trigger on

@@ -18,6 +18,8 @@ import { tmpdir } from "os";
  */
 
 const TEST_DIR = join(tmpdir(), `hermes-test-secrets-key-${Date.now()}`);
+const itPosix = process.platform === "win32" ? it.skip : it;
+const ORIGINAL_API_SERVER_KEY = process.env.API_SERVER_KEY;
 
 async function freshConfig(
   home: string,
@@ -29,17 +31,19 @@ async function freshConfig(
 
 beforeEach(() => {
   mkdirSync(TEST_DIR, { recursive: true });
+  delete process.env.API_SERVER_KEY;
 });
 
 afterEach(() => {
   delete process.env.HERMES_HOME;
-  delete process.env.API_SERVER_KEY;
+  if (ORIGINAL_API_SERVER_KEY === undefined) delete process.env.API_SERVER_KEY;
+  else process.env.API_SERVER_KEY = ORIGINAL_API_SERVER_KEY;
   vi.resetModules();
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe("getApiServerKey secrets-provider overlay", () => {
-  it("resolves a vault-stored key via the command provider when .env is empty", async () => {
+  itPosix("resolves a vault-stored key via the command provider when .env is empty", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       [
@@ -68,7 +72,7 @@ describe("getApiServerKey secrets-provider overlay", () => {
     expect(getApiServerKey()).toBe("from-dotenv");
   });
 
-  it(".env wins over the command provider when both have the key", async () => {
+  itPosix(".env wins over the command provider when both have the key", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       [
@@ -84,7 +88,7 @@ describe("getApiServerKey secrets-provider overlay", () => {
     expect(getApiServerKey()).toBe("from-dotenv");
   });
 
-  it("process.env wins over the command provider", async () => {
+  itPosix("process.env wins over the command provider", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       [

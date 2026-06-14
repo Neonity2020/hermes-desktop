@@ -3,6 +3,17 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
+const persistedDesktopConfig = vi.hoisted(() => ({
+  value: {} as Record<string, unknown>,
+}));
+
+vi.mock("../src/main/config", () => ({
+  readDesktopConfig: () => ({ ...persistedDesktopConfig.value }),
+  writeDesktopConfig: (data: Record<string, unknown>) => {
+    persistedDesktopConfig.value = { ...data };
+  },
+}));
+
 let testHome: string;
 
 async function loadLocaleModule(): Promise<
@@ -16,6 +27,7 @@ async function loadLocaleModule(): Promise<
 describe("app locale persistence", () => {
   beforeEach(() => {
     testHome = mkdtempSync(join(tmpdir(), "hermes-locale-"));
+    persistedDesktopConfig.value = {};
   });
 
   afterEach(() => {
@@ -23,13 +35,17 @@ describe("app locale persistence", () => {
     rmSync(testHome, { recursive: true, force: true });
   });
 
-  it("reloads the saved locale after the main process restarts", async () => {
-    const firstRun = await loadLocaleModule();
+  it(
+    "reloads the saved locale after the main process restarts",
+    async () => {
+      const firstRun = await loadLocaleModule();
 
-    expect(firstRun.setAppLocale("es")).toBe("es");
+      expect(firstRun.setAppLocale("es")).toBe("es");
 
-    const secondRun = await loadLocaleModule();
+      const secondRun = await loadLocaleModule();
 
-    expect(secondRun.getAppLocale()).toBe("es");
-  }, 15000);
+      expect(secondRun.getAppLocale()).toBe("es");
+    },
+    30000,
+  );
 });

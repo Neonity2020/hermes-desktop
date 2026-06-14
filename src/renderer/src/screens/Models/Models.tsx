@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import toast from "react-hot-toast";
 import {
   Plus,
@@ -125,6 +125,7 @@ function Models({ visible }: ModelsProps = {}): React.JSX.Element {
   const [formApiKey, setFormApiKey] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [formError, setFormError] = useState("");
+  const loadSeqRef = useRef(0);
   // Whether the user has manually picked a value from the Provider dropdown
   // for this open of the modal. While false, the dropdown follows whatever
   // detectProviderFromUrl() infers from the Base URL field. Once the user
@@ -133,9 +134,15 @@ function Models({ visible }: ModelsProps = {}): React.JSX.Element {
   const [providerAutoFilled, setProviderAutoFilled] = useState(false);
 
   const loadModels = useCallback(async () => {
-    const list = await window.hermesAPI.listModels();
-    setModels(list);
-    setLoading(false);
+    const seq = ++loadSeqRef.current;
+    setLoading(true);
+    try {
+      const list = await window.hermesAPI.listModels();
+      if (seq !== loadSeqRef.current) return;
+      setModels(list);
+    } finally {
+      if (seq === loadSeqRef.current) setLoading(false);
+    }
   }, []);
 
   const loadAuxConfig = useCallback(async () => {
@@ -190,6 +197,22 @@ function Models({ visible }: ModelsProps = {}): React.JSX.Element {
       loadAuxConfig();
     }
   }, [visible, loadModels, loadAuxConfig]);
+
+  useEffect(() => {
+    return window.hermesAPI.onConnectionConfigChanged(() => {
+      setModels([]);
+      setProviderFilter(null);
+      setSearch("");
+      void loadModels();
+      void loadAuxConfig();
+    });
+  }, [loadModels, loadAuxConfig]);
+
+  useEffect(() => {
+    return window.hermesAPI.onModelLibraryChanged(() => {
+      void loadModels();
+    });
+  }, [loadModels]);
 
   // Live model discovery for the Add/Edit modal — feeds an HTML
   // <datalist> off the Model ID input.  Pauses when the modal is closed

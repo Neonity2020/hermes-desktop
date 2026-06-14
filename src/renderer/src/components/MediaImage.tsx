@@ -42,7 +42,8 @@ export function MediaImage({
   );
   const [failed, setFailed] = useState(false);
   const [zoomed, setZoomed] = useState(false);
-  const onContextMenu = useMediaContextMenu(token);
+  const resolvedToken = { ...token, src: resolved ?? token.src };
+  const onContextMenu = useMediaContextMenu(resolvedToken);
 
   useEffect(() => {
     if (isDirect) return;
@@ -103,7 +104,7 @@ export function MediaImage({
             <button
               className="chat-image-preview-btn"
               onClick={() =>
-                window.hermesAPI.saveMediaFile(token.src, token.name)
+                window.hermesAPI.saveMediaFile(resolved ?? token.src, token.name)
               }
             >
               <Download size={14} />

@@ -23,6 +23,14 @@ import {
   getModelContextWindow,
 } from "./model-discovery";
 import {
+  persistSessionContinuation,
+  persistSessionLocalError,
+} from "./session-continuation-store";
+import type {
+  DesktopSessionContinuationItem,
+  DesktopSessionLocalError,
+} from "../shared/session-continuation";
+import {
   cleanupTempMediaFiles,
   materializeDataUrlToTemp,
   readMediaAsDataUrl,
@@ -50,6 +58,10 @@ import {
   readLogs,
   InstallProgress,
 } from "./installer";
+import {
+  ensureLocalDashboardCompatibility,
+  ensureSshDashboardCompatibility,
+} from "./hermes-agent-compat";
 import {
   addMcpServer,
   installMcpCatalogEntry,
@@ -85,7 +97,15 @@ import {
   resolvePendingClarify,
 } from "./hermes";
 import {
+  getDashboardStatus,
+  startDashboard,
+  stopAllDashboards,
+  stopDashboard,
+} from "./dashboard";
+import {
   startSshTunnel,
+  ensureSshTunnel,
+  getSshTunnelUrl,
   stopSshTunnel,
   testSshConnection,
   isSshTunnelActive,
@@ -122,12 +142,14 @@ import {
   addCredentialPoolEntry,
   getConnectionConfig,
   getPublicConnectionConfig,
+  normalizeRemoteChatTransport,
   resolveConnectionApiKeyUpdate,
   setConnectionConfig,
   getPlatformEnabled,
   setPlatformEnabled,
   getApiServerKeyStatus,
   invalidateSecretsCache,
+  type ConnectionConfig,
 } from "./config";
 import {
   getAuxiliaryConfig,
@@ -135,17 +157,42 @@ import {
   resetAuxiliaryToAuto,
 } from "./auxiliary-config";
 import {
+  applySessionLocalOverlays,
   listSessions,
   getSessionMessages,
   searchSessions,
   deleteSession,
   deleteSessions,
 } from "./sessions";
+import { closeDbConnection } from "./db";
 import {
   syncSessionCache,
   listCachedSessions,
   updateSessionTitle,
 } from "./session-cache";
+import {
+  remoteDeleteSession,
+  remoteDeleteSessions,
+  remoteGetSessionMessages,
+  remoteListCachedSessions,
+  remoteListSessions,
+  remoteReadMediaAsDataUrl,
+  remoteSearchSessions,
+  remoteUpdateSessionTitle,
+  type RemoteSessionConfig,
+} from "./remote-sessions";
+import {
+  remoteGetHermesHome,
+  remoteGetHermesVersion,
+} from "./remote-metadata";
+import {
+  remoteAddModel,
+  remoteGetModelConfig,
+  remoteListModels,
+  remoteRemoveModel,
+  remoteSetModelConfig,
+  remoteUpdateModel,
+} from "./remote-models";
 import { listModels, addModel, removeModel, updateModel } from "./models";
 import { validateChatReadiness } from "./validation";
 import {
@@ -307,11 +354,156 @@ process.on("unhandledRejection", (reason) => {
   console.error("[MAIN UNHANDLED REJECTION]", reason);
 });
 
+const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME?.trim() || "Hermes One";
+
 let mainWindow: BrowserWindow | null = null;
 // Per-run abort handles, keyed by the renderer-minted runId. Multiple chats
 // run concurrently (background sessions / multi-agent), so starting a new run
 // must not abort siblings — only a re-send under the same runId does.
 const activeRuns = new Map<string, () => void>();
+
+function notifyConnectionConfigChanged(): void {
+  mainWindow?.webContents.send(
+    "connection-config-changed",
+    getPublicConnectionConfig(),
+  );
+}
+
+function notifyModelLibraryChanged(): void {
+  mainWindow?.webContents.send("model-library-changed");
+}
+
+type RemoteSessionBridgeConfig = RemoteSessionConfig;
+
+async function getSshDashboardSessionConfig(
+  conn: ConnectionConfig,
+): Promise<RemoteSessionBridgeConfig> {
+  if (conn.mode !== "ssh" || !conn.ssh) {
+    throw new Error("SSH connection is not configured.");
+  }
+  if (!(await sshGatewayStatus(conn.ssh))) {
+    await sshStartGateway(conn.ssh);
+  }
+  await ensureSshTunnel(conn.ssh);
+  const remoteUrl = getSshTunnelUrl();
+  const apiKey = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
+  if (!remoteUrl) throw new Error("SSH tunnel is not active.");
+  if (!apiKey.trim()) {
+    throw new Error(
+      "SSH dashboard sessions need a configured dashboard token or API_SERVER_KEY on the remote Hermes host.",
+    );
+  }
+  setSshRemoteApiKey(apiKey);
+  return { remoteUrl, apiKey };
+}
+
+async function withSshDashboardSessions<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>,
+  legacyOperation?: () => Promise<T> | T,
+): Promise<T> {
+  if (conn.sshChatTransport === "legacy") {
+    if (legacyOperation) return legacyOperation();
+    throw new Error("This SSH session operation requires dashboard transport.");
+  }
+
+  try {
+    return await dashboardOperation(await getSshDashboardSessionConfig(conn));
+  } catch (err) {
+    if (conn.sshChatTransport === "auto" && legacyOperation) {
+      return legacyOperation();
+    }
+    throw err;
+  }
+}
+
+async function withSshDashboardModelLibrary<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>,
+  legacyOperation: () => Promise<T> | T,
+): Promise<T> {
+  if (conn.mode !== "ssh" || !conn.ssh) {
+    throw new Error("SSH connection is not configured.");
+  }
+  if (conn.sshChatTransport === "legacy") {
+    return legacyOperation();
+  }
+
+  const compat = await ensureSshDashboardCompatibility(conn.ssh);
+  if (!compat.ok) {
+    console.warn(
+      "[ssh-model-library] Dashboard model-library compatibility check failed",
+      compat.error ? `${compat.detail}: ${compat.error}` : compat.detail,
+    );
+  } else if (compat.applied) {
+    try {
+      await sshStopGateway(conn.ssh);
+    } catch (err) {
+      console.warn("[ssh-model-library] Failed to stop patched gateway", err);
+    }
+    stopSshTunnel();
+    await sshStartGateway(conn.ssh);
+  }
+
+  return dashboardOperation(await getSshDashboardSessionConfig(conn));
+}
+
+async function withRemoteDashboard<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: () => Promise<T>,
+  legacyOperation: () => Promise<T> | T,
+): Promise<T> {
+  if (conn.remoteChatTransport === "legacy") return legacyOperation();
+  try {
+    return await dashboardOperation();
+  } catch (err) {
+    if (conn.remoteChatTransport === "auto") return legacyOperation();
+    throw err;
+  }
+}
+
+async function getActiveDashboardMediaConfig(): Promise<RemoteSessionBridgeConfig | null> {
+  const conn = getConnectionConfig();
+  if (conn.mode === "remote") {
+    if (conn.remoteChatTransport === "legacy") return null;
+    if (!conn.remoteUrl.trim() || !conn.apiKey.trim()) return null;
+    return { remoteUrl: conn.remoteUrl, apiKey: conn.apiKey };
+  }
+  if (conn.mode === "ssh") {
+    if (conn.sshChatTransport === "legacy") return null;
+    try {
+      return await getSshDashboardSessionConfig(conn);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function readMediaForCurrentConnection(
+  filePath: string,
+): Promise<string | null> {
+  const local = readMediaAsDataUrl(filePath);
+  if (local) return local;
+
+  const remote = await getActiveDashboardMediaConfig();
+  return remote ? remoteReadMediaAsDataUrl(remote, filePath) : null;
+}
+
+async function mediaFileExistsForCurrentConnection(
+  filePath: string,
+): Promise<boolean> {
+  if (mediaFileExists(filePath)) return true;
+
+  const remote = await getActiveDashboardMediaConfig();
+  if (!remote) return false;
+  return (await remoteReadMediaAsDataUrl(remote, filePath)) !== null;
+}
+
+async function resolveMediaForSave(src: string): Promise<string> {
+  if (src.startsWith("data:") || /^https?:\/\//i.test(src)) return src;
+  return (await readMediaForCurrentConnection(src)) ?? src;
+}
 
 function openExternalUrl(rawUrl: unknown): void {
   if (!isAllowedExternalUrl(rawUrl)) {
@@ -331,6 +523,7 @@ function createWindow(): void {
     width: 1100,
     height: 850,
     minWidth: 900,
+    title: APP_NAME,
     // Lowered from 820 to fit on 768p / 720p displays — Linux WMs
     // enforce minHeight strictly, clipping content (chat input, bottom
     // nav items) below the screen edge on 1366×768 laptops. Issue #393.
@@ -508,12 +701,24 @@ function setupIPC(): void {
   // Hermes engine info
   ipcMain.handle("get-hermes-version", async () => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) return sshGetHermesVersion(conn.ssh);
+    if (conn.mode === "remote") return remoteGetHermesVersion(conn);
+    if (conn.mode === "ssh" && conn.ssh)
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteGetHermesVersion(config),
+        () => sshGetHermesVersion(conn.ssh),
+      );
     return getHermesVersion();
   });
   ipcMain.handle("refresh-hermes-version", async () => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) return sshGetHermesVersion(conn.ssh);
+    if (conn.mode === "remote") return remoteGetHermesVersion(conn);
+    if (conn.mode === "ssh" && conn.ssh)
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteGetHermesVersion(config),
+        () => sshGetHermesVersion(conn.ssh),
+      );
     clearVersionCache();
     return getHermesVersion();
   });
@@ -534,15 +739,39 @@ function setupIPC(): void {
           log: "Running hermes update over SSH...\n",
         });
         await sshRunUpdate(conn.ssh);
+        const compat = await ensureSshDashboardCompatibility(conn.ssh);
+        if (!compat.ok) {
+          event.sender.send("install-progress", {
+            step: 1,
+            totalSteps: 1,
+            title: "Updating remote Hermes Agent",
+            detail: "Dashboard compatibility check needs attention.",
+            log: `Dashboard compatibility warning: ${
+              compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
+            }\n`,
+          });
+        }
         await sshStartGateway(conn.ssh);
         await startSshTunnel(conn.ssh);
-        const key = await sshReadRemoteApiKey(conn.ssh);
+        const key = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
         setSshRemoteApiKey(key);
         return { success: true };
       }
       await runHermesUpdate((progress: InstallProgress) => {
         event.sender.send("install-progress", progress);
       });
+      const compat = ensureLocalDashboardCompatibility();
+      if (!compat.ok) {
+        event.sender.send("install-progress", {
+          step: 1,
+          totalSteps: 1,
+          title: "Updating Hermes Agent",
+          detail: "Dashboard compatibility check needs attention.",
+          log: `Dashboard compatibility warning: ${
+            compat.error ? `${compat.detail}: ${compat.error}` : compat.detail
+          }\n`,
+        });
+      }
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };
@@ -692,15 +921,30 @@ function setupIPC(): void {
 
   ipcMain.handle("get-hermes-home", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteGetHermesHome(conn);
     if (conn.mode === "ssh" && conn.ssh)
-      return sshGetHermesHome(conn.ssh, profile);
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteGetHermesHome(config),
+        () => sshGetHermesHome(conn.ssh, profile),
+      );
     return getHermesHome(profile);
   });
 
   ipcMain.handle("get-model-config", (_event, profile?: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return withRemoteDashboard(
+        conn,
+        () => remoteGetModelConfig(conn),
+        () => getModelConfig(profile),
+      );
     if (conn.mode === "ssh" && conn.ssh)
-      return sshGetModelConfig(conn.ssh, profile);
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteGetModelConfig(config),
+        () => sshGetModelConfig(conn.ssh!, profile),
+      );
     return getModelConfig(profile);
   });
 
@@ -714,19 +958,50 @@ function setupIPC(): void {
       profile?: string,
     ) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote") {
+        return withRemoteDashboard(
+          conn,
+          () => remoteSetModelConfig(conn, provider, model, baseUrl),
+          () => {
+            const prev = getModelConfig(profile);
+            setModelConfig(provider, model, baseUrl, profile);
+            if (
+              isGatewayRunning(profile) &&
+              (prev.provider !== provider ||
+                prev.model !== model ||
+                prev.baseUrl !== baseUrl)
+            ) {
+              restartGateway(profile);
+            }
+            return true;
+          },
+        );
+      }
       if (conn.mode === "ssh" && conn.ssh) {
-        const prev = await sshGetModelConfig(conn.ssh, profile);
-        await sshSetModelConfig(conn.ssh, provider, model, baseUrl, profile);
-        if (
-          (await sshGatewayStatus(conn.ssh)) &&
-          (prev.provider !== provider ||
-            prev.model !== model ||
-            prev.baseUrl !== baseUrl)
-        ) {
-          await sshStopGateway(conn.ssh);
-          await sshStartGateway(conn.ssh);
-        }
-        return true;
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteSetModelConfig(config, provider, model, baseUrl),
+          async () => {
+            const prev = await sshGetModelConfig(conn.ssh!, profile);
+            await sshSetModelConfig(
+              conn.ssh!,
+              provider,
+              model,
+              baseUrl,
+              profile,
+            );
+            if (
+              (await sshGatewayStatus(conn.ssh!)) &&
+              (prev.provider !== provider ||
+                prev.model !== model ||
+                prev.baseUrl !== baseUrl)
+            ) {
+              await sshStopGateway(conn.ssh!);
+              await sshStartGateway(conn.ssh!);
+            }
+            return true;
+          },
+        );
       }
       const prev = getModelConfig(profile);
       setModelConfig(provider, model, baseUrl, profile);
@@ -858,6 +1133,27 @@ function setupIPC(): void {
           apiKey,
         ),
       });
+      notifyConnectionConfigChanged();
+      return true;
+    },
+  );
+
+  ipcMain.handle(
+    "set-connection-chat-transports",
+    (
+      _event,
+      remoteChatTransport: unknown,
+      sshChatTransport: unknown,
+    ) => {
+      const current = getConnectionConfig();
+      setConnectionConfig({
+        ...current,
+        remoteChatTransport: normalizeRemoteChatTransport(
+          remoteChatTransport,
+        ),
+        sshChatTransport: normalizeRemoteChatTransport(sshChatTransport),
+      });
+      notifyConnectionConfigChanged();
       return true;
     },
   );
@@ -879,6 +1175,7 @@ function setupIPC(): void {
         mode: "ssh",
         ssh: { host, port, username, keyPath, remotePort, localPort },
       });
+      notifyConnectionConfigChanged();
       return true;
     },
   );
@@ -914,10 +1211,10 @@ function setupIPC(): void {
     if (conn.ssh && !(await sshGatewayStatus(conn.ssh))) {
       await sshStartGateway(conn.ssh);
     }
-    await startSshTunnel(conn.ssh);
+    await ensureSshTunnel(conn.ssh);
     // Cache the remote API key so chat auth works through the tunnel
     if (conn.ssh) {
-      const key = await sshReadRemoteApiKey(conn.ssh);
+      const key = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
       setSshRemoteApiKey(key);
     }
     return true;
@@ -965,12 +1262,13 @@ function setupIPC(): void {
         const tunnelHealthy = await isSshTunnelHealthy();
         if (!gatewayRunning || !tunnelHealthy) {
           await sshStartGateway(conn.ssh);
-          await startSshTunnel(conn.ssh);
+          await ensureSshTunnel(conn.ssh);
         }
         // Always ensure the API key is cached — the key may not have been
         // read yet if the app-launch auto-start failed silently (#212).
         if (!getRemoteAuthHeader().Authorization) {
-          const key = await sshReadRemoteApiKey(conn.ssh);
+          const key =
+            conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
           setSshRemoteApiKey(key);
         }
       }
@@ -1055,10 +1353,13 @@ function setupIPC(): void {
                 .trim()
                 .slice(0, 80);
               new Notification({
-                title: "Hermes One",
+                title: APP_NAME,
                 body: preview || "Response ready",
               }).show();
             }
+          },
+          onSessionStarted: (sessionId) => {
+            safeSend("chat-session-started", sessionId);
           },
           onError: (error) => {
             activeRuns.delete(chatRunId);
@@ -1067,7 +1368,7 @@ function setupIPC(): void {
             // Notify on error too if window not focused
             if (mainWindow && !mainWindow.isFocused()) {
               new Notification({
-                title: "Hermes One — Error",
+                title: `${APP_NAME} — Error`,
                 body: error.slice(0, 100),
               }).show();
             }
@@ -1129,13 +1430,17 @@ function setupIPC(): void {
 
   // Media — render agent-generated images and save them to disk (#299).
   ipcMain.handle("read-media-file", (_event, filePath: string) =>
-    readMediaAsDataUrl(filePath),
+    readMediaForCurrentConnection(filePath),
   );
-  ipcMain.handle("save-media-file", (event, src: string, name: string) =>
-    saveMedia(src, name, BrowserWindow.fromWebContents(event.sender)),
+  ipcMain.handle("save-media-file", async (event, src: string, name: string) =>
+    saveMedia(
+      await resolveMediaForSave(src),
+      name,
+      BrowserWindow.fromWebContents(event.sender),
+    ),
   );
   ipcMain.handle("media-file-exists", (_event, filePath: string) =>
-    mediaFileExists(filePath),
+    mediaFileExistsForCurrentConnection(filePath),
   );
 
   // Native right-click menu for a rendered media element (#299): "Open"
@@ -1279,6 +1584,18 @@ function setupIPC(): void {
     if (conn.mode === "ssh" && conn.ssh) return sshGatewayStatus(conn.ssh);
     return isGatewayRunning();
   });
+
+  // Dashboard/WebSocket transport probe. This is intentionally separate from
+  // the current chat path while we validate the ordered event stream.
+  ipcMain.handle("dashboard-status", (_event, profile?: string) =>
+    getDashboardStatus(profile),
+  );
+  ipcMain.handle("start-dashboard", (_event, profile?: string) =>
+    startDashboard(profile),
+  );
+  ipcMain.handle("stop-dashboard", (_event, profile?: string) =>
+    stopDashboard(profile),
+  );
 
   // Platform toggles (config.yaml platforms section)
   ipcMain.handle("get-platform-enabled", (_event, profile?: string) => {
@@ -1426,24 +1743,77 @@ function setupIPC(): void {
   // Sessions
   ipcMain.handle("list-sessions", (_event, limit?: number, offset?: number) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteListSessions(conn, limit, offset);
     if (conn.mode === "ssh" && conn.ssh)
-      return sshListSessions(conn.ssh, limit, offset);
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteListSessions(config, limit, offset),
+        () => sshListSessions(conn.ssh, limit, offset),
+      );
     return listSessions(limit, offset);
   });
 
   ipcMain.handle("get-session-messages", (_event, sessionId: string) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteGetSessionMessages(conn, sessionId).then((items) =>
+        applySessionLocalOverlays(sessionId, items),
+      );
     if (conn.mode === "ssh" && conn.ssh)
-      return sshGetSessionMessages(conn.ssh, sessionId);
+      return withSshDashboardSessions(
+        conn,
+        (config) =>
+          remoteGetSessionMessages(config, sessionId).then((items) =>
+            applySessionLocalOverlays(sessionId, items),
+          ),
+        () =>
+          sshGetSessionMessages(conn.ssh, sessionId).then((items) =>
+            applySessionLocalOverlays(sessionId, items),
+          ),
+      );
     return getSessionMessages(sessionId);
   });
 
+  ipcMain.handle(
+    "record-session-continuation",
+    (
+      _event,
+      sessionId: string,
+      items: DesktopSessionContinuationItem[],
+    ) => {
+      persistSessionContinuation(sessionId, items);
+      return true;
+    },
+  );
+
+  ipcMain.handle(
+    "record-session-local-error",
+    (_event, sessionId: string, error: DesktopSessionLocalError) => {
+      persistSessionLocalError(sessionId, error?.error, error?.userContent);
+      return true;
+    },
+  );
+
   ipcMain.handle("delete-session", (_event, sessionId: string) => {
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteDeleteSession(conn, sessionId);
+    if (conn.mode === "ssh" && conn.ssh)
+      return withSshDashboardSessions(conn, (config) =>
+        remoteDeleteSession(config, sessionId),
+      );
     return deleteSession(sessionId);
   });
 
   ipcMain.handle("delete-sessions", (_event, sessionIds: string[]) => {
-    return deleteSessions(Array.isArray(sessionIds) ? sessionIds : []);
+    const ids = Array.isArray(sessionIds) ? sessionIds : [];
+    const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteDeleteSessions(conn, ids);
+    if (conn.mode === "ssh" && conn.ssh)
+      return withSshDashboardSessions(conn, (config) =>
+        remoteDeleteSessions(config, ids),
+      );
+    return deleteSessions(ids);
   });
 
   // Profiles
@@ -1614,15 +1984,26 @@ function setupIPC(): void {
     "list-cached-sessions",
     (_event, limit?: number, offset?: number) => {
       const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteListCachedSessions(conn, limit, offset);
       if (conn.mode === "ssh" && conn.ssh)
-        return sshListCachedSessions(conn.ssh, limit, offset);
+        return withSshDashboardSessions(
+          conn,
+          (config) => remoteListCachedSessions(config, limit, offset),
+          () => sshListCachedSessions(conn.ssh, limit, offset),
+        );
       return listCachedSessions(limit, offset);
     },
   );
   ipcMain.handle("sync-session-cache", () => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote") return remoteListCachedSessions(conn, 50);
     if (conn.mode === "ssh" && conn.ssh)
-      return sshListCachedSessions(conn.ssh, 50);
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteListCachedSessions(config, 50),
+        () => sshListCachedSessions(conn.ssh, 50),
+      );
     try {
       return syncSessionCache();
     } catch (error) {
@@ -1632,15 +2013,29 @@ function setupIPC(): void {
   });
   ipcMain.handle(
     "update-session-title",
-    (_event, sessionId: string, title: string) =>
-      updateSessionTitle(sessionId, title),
+    (_event, sessionId: string, title: string) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "remote")
+        return remoteUpdateSessionTitle(conn, sessionId, title);
+      if (conn.mode === "ssh" && conn.ssh)
+        return withSshDashboardSessions(conn, (config) =>
+          remoteUpdateSessionTitle(config, sessionId, title),
+        );
+      return updateSessionTitle(sessionId, title);
+    },
   );
 
   // Session search
   ipcMain.handle("search-sessions", (_event, query: string, limit?: number) => {
     const conn = getConnectionConfig();
+    if (conn.mode === "remote")
+      return remoteSearchSessions(conn, query, limit);
     if (conn.mode === "ssh" && conn.ssh)
-      return sshSearchSessions(conn.ssh, query, limit);
+      return withSshDashboardSessions(
+        conn,
+        (config) => remoteSearchSessions(config, query, limit),
+        () => sshSearchSessions(conn.ssh, query, limit),
+      );
     return searchSessions(query, limit);
   });
 
@@ -1684,12 +2079,29 @@ function setupIPC(): void {
   // Models
   ipcMain.handle("list-models", () => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) return sshListModels(conn.ssh);
+    if (conn.mode === "remote") {
+      if (conn.remoteChatTransport === "legacy") {
+        throw new Error(
+          "Remote model library reads require dashboard transport.",
+        );
+      }
+      return remoteListModels(conn);
+    }
+    if (conn.mode === "ssh" && conn.ssh) {
+      if (conn.sshChatTransport === "legacy") {
+        return sshListModels(conn.ssh);
+      }
+      return withSshDashboardModelLibrary(
+        conn,
+        (config) => remoteListModels(config),
+        () => sshListModels(conn.ssh!),
+      );
+    }
     return listModels();
   });
   ipcMain.handle(
     "add-model",
-    (
+    async (
       _event,
       name: string,
       provider: string,
@@ -1697,24 +2109,72 @@ function setupIPC(): void {
       baseUrl: string,
     ) => {
       const conn = getConnectionConfig();
-      if (conn.mode === "ssh" && conn.ssh) {
-        return sshAddModel(conn.ssh, name, provider, model, baseUrl);
+      let addedModel: Awaited<ReturnType<typeof addModel>>;
+      if (conn.mode === "remote") {
+        if (conn.remoteChatTransport === "legacy") {
+          throw new Error(
+            "Remote model library writes require dashboard transport.",
+          );
+        }
+        addedModel = await remoteAddModel(conn, name, provider, model, baseUrl);
+      } else if (conn.mode === "ssh" && conn.ssh) {
+        addedModel = await withSshDashboardModelLibrary(
+          conn,
+          (config) => remoteAddModel(config, name, provider, model, baseUrl),
+          () => sshAddModel(conn.ssh!, name, provider, model, baseUrl),
+        );
+      } else {
+        addedModel = addModel(name, provider, model, baseUrl);
       }
-      return addModel(name, provider, model, baseUrl);
+      notifyModelLibraryChanged();
+      return addedModel;
     },
   );
-  ipcMain.handle("remove-model", (_event, id: string) => {
+  ipcMain.handle("remove-model", async (_event, id: string) => {
     const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh) return sshRemoveModel(conn.ssh, id);
-    return removeModel(id);
+    let removed: boolean;
+    if (conn.mode === "remote") {
+      if (conn.remoteChatTransport === "legacy") {
+        throw new Error(
+          "Remote model library writes require dashboard transport.",
+        );
+      }
+      removed = await remoteRemoveModel(conn, id);
+    } else if (conn.mode === "ssh" && conn.ssh) {
+      removed = await withSshDashboardModelLibrary(
+        conn,
+        (config) => remoteRemoveModel(config, id),
+        () => sshRemoveModel(conn.ssh!, id),
+      );
+    } else {
+      removed = removeModel(id);
+    }
+    if (removed) notifyModelLibraryChanged();
+    return removed;
   });
   ipcMain.handle(
     "update-model",
-    (_event, id: string, fields: Record<string, string>) => {
+    async (_event, id: string, fields: Record<string, string>) => {
       const conn = getConnectionConfig();
-      if (conn.mode === "ssh" && conn.ssh)
-        return sshUpdateModel(conn.ssh, id, fields);
-      return updateModel(id, fields);
+      let updated: boolean;
+      if (conn.mode === "remote") {
+        if (conn.remoteChatTransport === "legacy") {
+          throw new Error(
+            "Remote model library writes require dashboard transport.",
+          );
+        }
+        updated = await remoteUpdateModel(conn, id, fields);
+      } else if (conn.mode === "ssh" && conn.ssh) {
+        updated = await withSshDashboardModelLibrary(
+          conn,
+          (config) => remoteUpdateModel(config, id, fields),
+          () => sshUpdateModel(conn.ssh!, id, fields),
+        );
+      } else {
+        updated = updateModel(id, fields);
+      }
+      if (updated) notifyModelLibraryChanged();
+      return updated;
     },
   );
 
@@ -2307,7 +2767,7 @@ if (process.env.ENABLE_CDP === "1") {
 }
 
 app.whenReady().then(() => {
-  app.setName("Hermes One");
+  app.setName(APP_NAME);
   electronApp.setAppUserModelId("com.nousresearch.hermes");
   cleanupTempMediaFiles();
 
@@ -2366,8 +2826,8 @@ app.whenReady().then(() => {
       if (!(await sshGatewayStatus(conn.ssh))) {
         await sshStartGateway(conn.ssh);
       }
-      await startSshTunnel(conn.ssh);
-      const key = await sshReadRemoteApiKey(conn.ssh);
+      await ensureSshTunnel(conn.ssh);
+      const key = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
       setSshRemoteApiKey(key);
     })().catch((err) => {
       console.error("[SSH TUNNEL] Failed to start on launch:", err);
@@ -2385,8 +2845,10 @@ app.on("window-all-closed", () => {
     // detached and meant to keep running headless (e.g. Telegram/Discord bots
     // stay online after the desktop closes). The user stops a gateway
     // explicitly via the Gateway controls.
+    stopAllDashboards();
     stopSshTunnel();
     stopClaw3d();
+    closeDbConnection();
     app.quit();
   }
 });
@@ -2398,6 +2860,8 @@ app.on("before-quit", () => {
   activeRuns.clear();
   // Leave profile gateways running on quit (see window-all-closed) so bots
   // and other platforms stay online headless.
+  stopAllDashboards();
   stopSshTunnel();
   stopClaw3d();
+  closeDbConnection();
 });

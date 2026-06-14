@@ -1,5 +1,7 @@
 import type { AppLocale } from "../shared/i18n/types";
 import type { Attachment } from "../shared/attachments";
+import type { DesktopSessionContinuationItem } from "../shared/session-continuation";
+import type { DesktopSessionLocalError } from "../shared/session-continuation";
 import type {
   RegistryKind,
   RegistryItem,
@@ -75,6 +77,26 @@ interface GatewayStartResult {
   success: boolean;
   running: boolean;
   alreadyRunning?: boolean;
+  error?: string;
+  logPath?: string;
+}
+
+interface DashboardConnection {
+  baseUrl: string;
+  wsUrl: string;
+  token: string;
+  mode: "local" | "remote" | "ssh";
+  profile?: string;
+  pid?: number;
+  port?: number;
+  logPath?: string;
+  alreadyRunning?: boolean;
+}
+
+interface DashboardStatus {
+  supported: boolean;
+  running: boolean;
+  connection?: DashboardConnection;
   error?: string;
   logPath?: string;
 }
@@ -277,6 +299,8 @@ interface HermesAPI {
   getConnectionConfig: () => Promise<{
     mode: "local" | "remote" | "ssh";
     remoteUrl: string;
+    remoteChatTransport: "auto" | "dashboard" | "legacy";
+    sshChatTransport: "auto" | "dashboard" | "legacy";
     hasApiKey: boolean;
     apiKeyLength: number;
     ssh: {
@@ -293,6 +317,28 @@ interface HermesAPI {
     remoteUrl: string,
     apiKey?: string,
   ) => Promise<boolean>;
+  setConnectionChatTransports: (
+    remoteChatTransport: "auto" | "dashboard" | "legacy",
+    sshChatTransport: "auto" | "dashboard" | "legacy",
+  ) => Promise<boolean>;
+  onConnectionConfigChanged: (
+    callback: (config: {
+      mode: "local" | "remote" | "ssh";
+      remoteUrl: string;
+      remoteChatTransport: "auto" | "dashboard" | "legacy";
+      sshChatTransport: "auto" | "dashboard" | "legacy";
+      hasApiKey: boolean;
+      apiKeyLength: number;
+      ssh: {
+        host: string;
+        port: number;
+        username: string;
+        keyPath: string;
+        remotePort: number;
+        localPort: number;
+      };
+    }) => void,
+  ) => () => void;
   setSshConfig: (
     host: string,
     port: number,
@@ -329,7 +375,10 @@ interface HermesAPI {
     mimeType: string,
     profile?: string,
   ) => Promise<string>;
-  getApiServerKeyStatus: (profile?: string) => Promise<{ hasKey: boolean }>;
+  getApiServerKeyStatus: (
+    profile?: string,
+  ) => Promise<{ hasKey: boolean; providerId?: string; checkedAt?: number }>;
+  invalidateSecretsCache: () => Promise<void>;
   generateApiServerKey: (profile?: string) => Promise<{ key: string }>;
   copyToClipboard: (text: string) => Promise<void>;
   onContextMenuCopyChat: (
@@ -378,6 +427,9 @@ interface HermesAPI {
   onChatDone: (
     callback: (runId: string, sessionId?: string) => void,
   ) => () => void;
+  onChatSessionStarted: (
+    callback: (runId: string, sessionId: string) => void,
+  ) => () => void;
   onChatToolProgress: (
     callback: (runId: string, tool: string) => void,
   ) => () => void;
@@ -417,6 +469,9 @@ interface HermesAPI {
   stopGateway: () => Promise<boolean>;
   restartGateway: (profile?: string) => Promise<boolean>;
   gatewayStatus: () => Promise<boolean>;
+  dashboardStatus: (profile?: string) => Promise<DashboardStatus>;
+  startDashboard: (profile?: string) => Promise<DashboardStatus>;
+  stopDashboard: (profile?: string) => Promise<boolean>;
 
   // Platform toggles
   getPlatformEnabled: (profile?: string) => Promise<Record<string, boolean>>;
@@ -468,6 +523,7 @@ interface HermesAPI {
           id: number;
           content: string;
           timestamp: number;
+          error?: string;
           attachments?: Attachment[];
         }
       | {
@@ -497,6 +553,14 @@ interface HermesAPI {
         }
     >
   >;
+  recordSessionContinuation: (
+    sessionId: string,
+    items: DesktopSessionContinuationItem[],
+  ) => Promise<boolean>;
+  recordSessionLocalError: (
+    sessionId: string,
+    error: DesktopSessionLocalError,
+  ) => Promise<boolean>;
 
   // Profiles
   listProfiles: () => Promise<
@@ -690,6 +754,7 @@ interface HermesAPI {
   }>;
   removeModel: (id: string) => Promise<boolean>;
   updateModel: (id: string, fields: Record<string, string>) => Promise<boolean>;
+  onModelLibraryChanged: (callback: () => void) => () => void;
 
   // Claw3D
   claw3dStatus: () => Promise<{

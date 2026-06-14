@@ -1,5 +1,10 @@
 import type { Attachment } from "../../../../shared/attachments";
-import type { ChatMessage, ChatBubbleMessage } from "./types";
+import {
+  isAssistantError,
+  isBubbleMessage,
+  normalizeMessageText,
+} from "./chatMessages";
+import type { ActiveTurn, ChatMessage, ChatBubbleMessage } from "./types";
 
 /**
  * Shape of one row from the main process's `getSessionMessages` IPC.
@@ -10,6 +15,7 @@ export interface DbHistoryItem {
   kind: "user" | "assistant" | "reasoning" | "tool_call" | "tool_result";
   id: number;
   content?: string;
+  error?: string;
   text?: string;
   callId?: string;
   name?: string;
@@ -53,6 +59,7 @@ export function dbItemsToChatMessages(
             id: `db-${it.id}`,
             role: "agent",
             content: it.content || "",
+            ...(it.error ? { error: it.error, localOnly: true } : {}),
             ...(it.attachments && it.attachments.length > 0
               ? { attachments: it.attachments }
               : {}),
@@ -129,11 +136,13 @@ function normalizeWhitespace(s: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+const LEGACY_TEXT_FILE_WRAPPER_RE =
+  /(?:\s*<file\b[^>]*>[\s\S]*?<\/file>\s*)+$/i;
+
 function normalizeBubbleContentForMatch(s: string): string {
-  return normalizeWhitespace(s).replace(
-    /(?:\s+\[(?:screenshot|image)\])+$/i,
-    "",
-  );
+  return normalizeWhitespace(
+    s.replace(LEGACY_TEXT_FILE_WRAPPER_RE, ""),
+  ).replace(/(?:\s+\[(?:screenshot|image)\])+$/i, "");
 }
 
 function nonWhitespaceLength(s: string): number {
@@ -225,6 +234,7 @@ function reconciliationKey(m: ChatMessage): string | null {
     }
   }
   const bubble = m as ChatBubbleMessage;
+  if (bubble.error || bubble.localOnly) return null;
   return `${bubble.role}:${normalizeBubbleContentForMatch(bubble.content || "").slice(0, 200)}`;
 }
 
@@ -281,6 +291,422 @@ function mergeDbMetadataIntoStreamed(
   return s;
 }
 
+function bubbleContentKey(m: ChatBubbleMessage): string {
+  return `${m.role}:${normalizeBubbleContentForMatch(m.content || "")}`;
+}
+
+function seedSeenBubbleKeys(
+  seen: Set<string>,
+  items: ReadonlyArray<ChatMessage>,
+): void {
+  for (const m of items) {
+    if (!("kind" in m)) {
+      seen.add(bubbleContentKey(m as ChatBubbleMessage));
+    }
+  }
+}
+
+function dedupeMessageIds(items: ReadonlyArray<ChatMessage>): ChatMessage[] {
+  const seen = new Set<string>();
+  const output: ChatMessage[] = [];
+  for (const item of items) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    output.push(item);
+  }
+  return output;
+}
+
+function compactOrphanDuplicateUserRuns(
+  streamed: ReadonlyArray<ChatMessage>,
+  db: ReadonlyArray<ChatMessage>,
+): ChatMessage[] {
+  const dbUserKeys = new Set<string>();
+  for (const m of db) {
+    if (isBubbleMessage(m) && m.role === "user") {
+      dbUserKeys.add(bubbleContentKey(m));
+    }
+  }
+  if (dbUserKeys.size === 0) return [...streamed];
+
+  const output: ChatMessage[] = [];
+  let run: ChatBubbleMessage[] = [];
+
+  const flushRun = (): void => {
+    if (run.length === 0) return;
+
+    const lastIndexByKey = new Map<string, number>();
+    for (let i = 0; i < run.length; i++) {
+      const key = bubbleContentKey(run[i]);
+      if (dbUserKeys.has(key)) lastIndexByKey.set(key, i);
+    }
+
+    for (let i = 0; i < run.length; i++) {
+      const key = bubbleContentKey(run[i]);
+      const lastIndex = lastIndexByKey.get(key);
+      if (lastIndex !== undefined && i < lastIndex) continue;
+      output.push(run[i]);
+    }
+    run = [];
+  };
+
+  for (const m of streamed) {
+    if (isBubbleMessage(m) && m.role === "user") {
+      run.push(m);
+      continue;
+    }
+
+    flushRun();
+    output.push(m);
+  }
+  flushRun();
+
+  return output;
+}
+
+function firstConsumedInSameTurn(
+  streamed: ReadonlyArray<ChatMessage>,
+  userIndex: number,
+  consumedIds: ReadonlySet<string>,
+): ChatMessage | null {
+  for (let i = userIndex + 1; i < streamed.length; i++) {
+    const m = streamed[i];
+    if (!("kind" in m) && (m as ChatBubbleMessage).role === "user") break;
+    if (consumedIds.has(m.id)) return m;
+  }
+  return null;
+}
+
+function anchorUnmatchedUsersBeforeConsumedTurnRows(
+  result: ChatMessage[],
+  streamed: ReadonlyArray<ChatMessage>,
+  consumedIds: Set<string>,
+): void {
+  const seen = new Set<string>();
+  seedSeenBubbleKeys(seen, result);
+
+  for (let i = 0; i < streamed.length; i++) {
+    const m = streamed[i];
+    if (consumedIds.has(m.id) || "kind" in m) continue;
+    const user = m as ChatBubbleMessage;
+    if (user.role !== "user") continue;
+
+    const anchor = firstConsumedInSameTurn(streamed, i, consumedIds);
+    if (!anchor) continue;
+
+    const key = bubbleContentKey(user);
+    if (seen.has(key)) continue;
+
+    const resultIndex = result.findIndex((row) => row.id === anchor.id);
+    if (resultIndex < 0) continue;
+
+    result.splice(resultIndex, 0, user);
+    consumedIds.add(user.id);
+    seen.add(key);
+  }
+}
+
+function previousUserBefore(
+  items: ReadonlyArray<ChatMessage>,
+  index: number,
+): ChatBubbleMessage | null {
+  for (let i = index - 1; i >= 0; i--) {
+    const m = items[i];
+    if (isBubbleMessage(m) && m.role === "user") return m;
+  }
+  return null;
+}
+
+function localErrorUserIds(items: ReadonlyArray<ChatMessage>): Set<string> {
+  const ids = new Set<string>();
+  for (let i = 0; i < items.length; i++) {
+    if (!isAssistantError(items[i])) continue;
+    const user = previousUserBefore(items, i);
+    if (user) ids.add(user.id);
+  }
+  return ids;
+}
+
+function sameAttachments(a: ChatBubbleMessage, b: ChatBubbleMessage): boolean {
+  const aAttachments = a.attachments ?? [];
+  const bAttachments = b.attachments ?? [];
+  if (aAttachments.length !== bAttachments.length) return false;
+  return aAttachments.every(
+    (att, index) =>
+      `${att.kind}\n${att.name}\n${att.mime}\n${att.size}\n${att.path || ""}` ===
+      `${bAttachments[index].kind}\n${bAttachments[index].name}\n${bAttachments[index].mime}\n${bAttachments[index].size}\n${bAttachments[index].path || ""}`,
+  );
+}
+
+function userContentKey(m: ChatBubbleMessage): string {
+  return `${normalizeMessageText(m.content)}\n${(m.attachments ?? [])
+    .map(
+      (att) =>
+        `${att.kind}\n${att.name}\n${att.mime}\n${att.size}\n${att.path || ""}`,
+    )
+    .join("\n")}`;
+}
+
+function hasUniqueCurrentUserContent(
+  current: ReadonlyArray<ChatMessage>,
+  user: ChatBubbleMessage,
+): boolean {
+  const key = userContentKey(user);
+  let count = 0;
+  for (const m of current) {
+    if (!isBubbleMessage(m) || m.role !== "user") continue;
+    if (userContentKey(m) === key) count++;
+  }
+  return count === 1;
+}
+
+function findMatchingUserIndex(
+  output: ReadonlyArray<ChatMessage>,
+  current: ReadonlyArray<ChatMessage>,
+  user: ChatBubbleMessage,
+): number {
+  const exact = output.findIndex(
+    (m) =>
+      isBubbleMessage(m) &&
+      m.role === "user" &&
+      (m.id === user.id || (!!m.turnId && m.turnId === user.turnId)),
+  );
+  if (exact >= 0) return exact;
+
+  if (!hasUniqueCurrentUserContent(current, user)) return -1;
+
+  return output.findIndex(
+    (m) =>
+      isBubbleMessage(m) &&
+      m.role === "user" &&
+      normalizeBubbleContentForMatch(m.content) ===
+        normalizeBubbleContentForMatch(user.content) &&
+      sameAttachments(m, user),
+  );
+}
+
+function findNextOutputAnchorIndex(
+  output: ReadonlyArray<ChatMessage>,
+  current: ReadonlyArray<ChatMessage>,
+  afterCurrentIndex: number,
+): number {
+  for (let i = afterCurrentIndex + 1; i < current.length; i++) {
+    const anchorIndex = output.findIndex((m) => m.id === current[i].id);
+    if (anchorIndex >= 0) return anchorIndex;
+  }
+  return output.length;
+}
+
+function insertAt<T>(items: ReadonlyArray<T>, index: number, rows: T[]): T[] {
+  return [...items.slice(0, index), ...rows, ...items.slice(index)];
+}
+
+function hasEquivalentAssistantError(
+  output: ReadonlyArray<ChatMessage>,
+  current: ReadonlyArray<ChatMessage>,
+  error: ChatBubbleMessage & { role: "agent"; error: string },
+  localUser: ChatBubbleMessage | null,
+): boolean {
+  const wantedError = normalizeMessageText(error.error);
+  const wantedContent = normalizeMessageText(error.content || "");
+
+  let start = 0;
+  if (localUser) {
+    const matchedUserIndex = findMatchingUserIndex(output, current, localUser);
+    if (matchedUserIndex < 0) return false;
+    start = matchedUserIndex + 1;
+  }
+
+  for (let i = start; i < output.length; i++) {
+    const candidate = output[i];
+    if (i > start && isBubbleMessage(candidate) && candidate.role === "user") {
+      break;
+    }
+    if (!isAssistantError(candidate)) continue;
+    if (normalizeMessageText(candidate.error) !== wantedError) continue;
+    if (normalizeMessageText(candidate.content || "") !== wantedContent) continue;
+    return true;
+  }
+  return false;
+}
+
+export function preserveLocalAssistantErrors(
+  nextMessages: ReadonlyArray<ChatMessage>,
+  currentMessages: ReadonlyArray<ChatMessage>,
+): ChatMessage[] {
+  let output = nextMessages.map((message) => {
+    const local = currentMessages.find((m) => m.id === message.id);
+    if (
+      isBubbleMessage(message) &&
+      message.role === "agent" &&
+      !message.error &&
+      local &&
+      isAssistantError(local)
+    ) {
+      return { ...message, error: local.error, pending: false };
+    }
+    return message;
+  });
+
+  const existingIds = new Set(output.map((m) => m.id));
+
+  for (let i = 0; i < currentMessages.length; i++) {
+    const error = currentMessages[i];
+    if (!isAssistantError(error) || existingIds.has(error.id)) continue;
+
+    const localUser = previousUserBefore(currentMessages, i);
+    if (hasEquivalentAssistantError(output, currentMessages, error, localUser)) {
+      continue;
+    }
+
+    const rows: ChatMessage[] = [];
+    let insertIndex = output.length;
+
+    if (localUser) {
+      const matchedUserIndex = findMatchingUserIndex(
+        output,
+        currentMessages,
+        localUser,
+      );
+      if (matchedUserIndex >= 0) {
+        insertIndex = matchedUserIndex + 1;
+      } else {
+        insertIndex = findNextOutputAnchorIndex(output, currentMessages, i);
+        if (!existingIds.has(localUser.id)) {
+          rows.push(localUser);
+        }
+      }
+    }
+
+    rows.push({ ...error, pending: false });
+    output = insertAt(output, insertIndex, rows);
+    for (const row of rows) existingIds.add(row.id);
+  }
+
+  return output;
+}
+
+function isDbSyncable(
+  m: ChatMessage,
+  failedUserIds: ReadonlySet<string>,
+): boolean {
+  if (isAssistantError(m)) return false;
+  if (isBubbleMessage(m)) {
+    if (m.localOnly) return false;
+    if (failedUserIds.has(m.id)) return false;
+  }
+  return true;
+}
+
+function clearPending(messages: ReadonlyArray<ChatMessage>): ChatMessage[] {
+  return messages.map((m) =>
+    isBubbleMessage(m) && m.pending ? { ...m, pending: false } : m,
+  );
+}
+
+function nextUserIndex(
+  items: ReadonlyArray<ChatMessage>,
+  afterIndex: number,
+): number {
+  for (let i = afterIndex + 1; i < items.length; i++) {
+    const m = items[i];
+    if (isBubbleMessage(m) && m.role === "user") return i;
+  }
+  return items.length;
+}
+
+function firstDbIndexMatchingActiveTurnOutput(
+  current: ReadonlyArray<ChatMessage>,
+  db: ReadonlyArray<ChatMessage>,
+  activeUserIndex: number,
+): number {
+  const stop = nextUserIndex(current, activeUserIndex);
+  const activeTurnKeys = new Set<string>();
+  for (let i = activeUserIndex + 1; i < stop; i++) {
+    const key = reconciliationKey(current[i]);
+    if (key) activeTurnKeys.add(key);
+  }
+
+  if (activeTurnKeys.size === 0) return -1;
+
+  for (let i = 0; i < db.length; i++) {
+    const key = reconciliationKey(db[i]);
+    if (key && activeTurnKeys.has(key)) return i;
+  }
+  return -1;
+}
+
+function findPreviousLocalErrorIndex(
+  items: ReadonlyArray<ChatMessage>,
+  beforeIndex: number,
+): number {
+  for (let i = beforeIndex - 1; i >= 0; i--) {
+    if (isAssistantError(items[i])) return i;
+  }
+  return -1;
+}
+
+function dbWithActiveUserAnchor(
+  db: ReadonlyArray<ChatMessage>,
+  current: ReadonlyArray<ChatMessage>,
+  activeTurn?: ActiveTurn | null,
+): ChatMessage[] {
+  if (!activeTurn || activeTurn.status === "failed") return [...db];
+
+  const currentActiveUserIndex = current.findIndex(
+    (m) => m.id === activeTurn.userId,
+  );
+  if (currentActiveUserIndex < 0) return [...db];
+
+  const activeUser = current[currentActiveUserIndex];
+  if (!isBubbleMessage(activeUser) || activeUser.role !== "user") return [...db];
+
+  if (findMatchingUserIndex(db, current, activeUser) >= 0) return [...db];
+
+  let insertIndex = firstDbIndexMatchingActiveTurnOutput(
+    current,
+    db,
+    currentActiveUserIndex,
+  );
+
+  if (insertIndex < 0) {
+    const previousErrorIndex = findPreviousLocalErrorIndex(
+      current,
+      currentActiveUserIndex,
+    );
+    const failedUser =
+      previousErrorIndex >= 0
+        ? previousUserBefore(current, previousErrorIndex)
+        : null;
+    const failedUserDbIndex = failedUser
+      ? findMatchingUserIndex(db, current, failedUser)
+      : -1;
+    if (failedUserDbIndex >= 0) {
+      insertIndex = failedUserDbIndex + 1;
+    }
+  }
+
+  if (insertIndex < 0) insertIndex = db.length;
+  return insertAt(db, insertIndex, [activeUser]);
+}
+
+export function reconcileAfterDbRefresh(
+  current: ReadonlyArray<ChatMessage>,
+  db: ReadonlyArray<ChatMessage>,
+  options: {
+    activeTurn?: ActiveTurn | null;
+  } = {},
+): ChatMessage[] {
+  if (options.activeTurn?.status === "failed") return [...current];
+
+  const failedUserIds = localErrorUserIds(current);
+  const syncableCurrent = current.filter((m) => isDbSyncable(m, failedUserIds));
+  const anchoredDb = dbWithActiveUserAnchor(db, current, options.activeTurn);
+  const reconciled = reconcileStreamedWithDb(syncableCurrent, anchoredDb);
+  const withLocalErrors = preserveLocalAssistantErrors(reconciled, current);
+  return clearPending(withLocalErrors);
+}
+
 /**
  * Merge an in-memory streamed transcript with the canonical state.db
  * transcript at end-of-stream.
@@ -308,6 +734,8 @@ export function reconcileStreamedWithDb(
   streamed: ReadonlyArray<ChatMessage>,
   db: ReadonlyArray<ChatMessage>,
 ): ChatMessage[] {
+  streamed = compactOrphanDuplicateUserRuns(streamed, db);
+
   // Index streamed messages by their reconciliation key. Duplicate
   // keys (same text in two turns) are tracked as a FIFO queue so the
   // walk below consumes them in the original order rather than
@@ -358,6 +786,10 @@ export function reconcileStreamedWithDb(
   // that didn't round-trip through the DB identically).
   const consumedIds = new Set(result.map((m) => m.id));
 
+  // Include anchored streamed user rows before building maps or dedupe sets
+  // from `result`; the anchor mutates the DB-ordered result in place.
+  anchorUnmatchedUsersBeforeConsumedTurnRows(result, streamed, consumedIds);
+
   // Map each consumed streamed message to its position in the DB-ordered result.
   const resultPosById = new Map<string, number>();
   for (let i = 0; i < result.length; i++) {
@@ -367,14 +799,7 @@ export function reconcileStreamedWithDb(
   // Seed a dedup set from all result items so unconsumed streamed messages
   // never duplicate what the DB already provided.
   const seenBubbleKeys = new Set<string>();
-  for (const m of result) {
-    if (!("kind" in m)) {
-      const bubble = m as ChatBubbleMessage;
-      seenBubbleKeys.add(
-        `${bubble.role}:${normalizeBubbleContentForMatch(bubble.content || "")}`,
-      );
-    }
-  }
+  seedSeenBubbleKeys(seenBubbleKeys, result);
 
   // Check whether an unconsumed streamed message should be kept, applying
   // the same dedup / canonical-tool-match / DB-split-artifact rules as before.
@@ -384,10 +809,8 @@ export function reconcileStreamedWithDb(
     // Only bubble messages (user/agent content) need dedup and split checks.
     if (!("kind" in m)) {
       const bubble = m as ChatBubbleMessage;
-      const contentKey = `${bubble.role}:${normalizeBubbleContentForMatch(bubble.content || "")}`;
-      // Check for duplicates first.
+      const contentKey = bubbleContentKey(bubble);
       if (seenBubbleKeys.has(contentKey)) return false;
-      // For agent bubbles, also check if covered by a DB split before marking as seen.
       if (
         bubble.role === "agent" &&
         isCoveredByDbBubbleSplit(bubble, dbAssistantSplitSequences)
@@ -404,10 +827,9 @@ export function reconcileStreamedWithDb(
   // positions instead of dumping them all into a suffix (which caused messages
   // from the *middle* of the conversation to jump to the bottom — issue #431).
   //
-  // Strategy: unconsumed messages that appear BEFORE the last consumed streamed
-  // message are interleaved at their correct position.  Unconsumed messages
-  // AFTER the last consumed message (e.g. error bubbles, renderer-only warnings)
-  // are deferred to a trailing suffix — matching the original behavior.
+  // Strategy: once a streamed turn has a consumed DB anchor, surviving
+  // unconsumed messages are interleaved at their streamed position. If no DB
+  // anchor exists at all, they stay in a trailing suffix.
   const merged: ChatMessage[] = [];
   let resultIdx = 0;
   const trailingSuffix: ChatMessage[] = [];
@@ -430,17 +852,11 @@ export function reconcileStreamedWithDb(
         }
       }
     } else if (shouldKeepUnconsumed(sm)) {
-      // Only interleave bubble messages (user/agent content) at their
-      // correct chronological positions.  Non-bubble rows (synthetic
-      // tool_call / tool_result / reasoning) that survive dedup are
-      // always deferred to the trailing suffix — matching the original
-      // behavior where they land after all DB result rows.
-      const isBubble = !("kind" in sm);
-      if (
-        isBubble &&
-        lastConsumedStreamIdx >= 0 &&
-        si <= lastConsumedStreamIdx
-      ) {
+      // Interleave all surviving streamed rows that occurred before the last
+      // consumed DB match. That includes renderer-only synthetic tool rows:
+      // keeping them in live order prevents grouped tool calls/results from
+      // jumping below later assistant text during session restore.
+      if (lastConsumedStreamIdx >= 0) {
         merged.push(sm);
       } else {
         trailingSuffix.push(sm);
@@ -464,7 +880,7 @@ export function reconcileStreamedWithDb(
   // landing *below* any agent content the gateway streamed after the user
   // answered (the reverse of what the user saw live). Re-anchor each card
   // immediately after the streamed message that preceded it.
-  return repositionClarifyCards(merged, streamed);
+  return repositionClarifyCards(dedupeMessageIds(merged), streamed);
 }
 
 /**

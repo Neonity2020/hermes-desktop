@@ -193,6 +193,13 @@ describe("unquoteDotenvValue", () => {
 });
 
 describe("CommandSecretsProvider", () => {
+  if (process.platform === "win32") {
+    it("is POSIX-only and is covered by integration tests on non-Windows hosts", () => {
+      expect(process.platform).toBe("win32");
+    });
+    return;
+  }
+
   const provider = new CommandSecretsProvider();
 
   beforeEach(() => {

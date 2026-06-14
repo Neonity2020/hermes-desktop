@@ -25,6 +25,24 @@ vi.mock("../src/main/installer", () => ({
   getEnhancedPath: () => process.env.PATH || "",
 }));
 
+vi.mock("../src/main/utils", () => ({
+  activeStateDbPath: () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const path = require("path");
+    return path.join(TEST_HOME, "state.db");
+  },
+  profileHome: () => TEST_HOME,
+  getActiveProfileNameSync: () => "default",
+  safeWriteFile: (path: string, data: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("fs");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodePath = require("path");
+    fs.mkdirSync(nodePath.dirname(path), { recursive: true });
+    fs.writeFileSync(path, data, "utf-8");
+  },
+}));
+
 // Stub the i18n + locale modules so the cache code doesn't need the
 // renderer-side translation files at test time.
 vi.mock("../src/shared/i18n", () => ({
@@ -197,6 +215,7 @@ vi.mock("better-sqlite3", () => {
 
 import Database from "better-sqlite3";
 import { syncSessionCache } from "../src/main/session-cache";
+import { closeDbConnection } from "../src/main/db";
 
 const CACHE_FILE = join(TEST_HOME, "desktop", "sessions.json");
 const DB_PATH = join(TEST_HOME, "state.db");
@@ -259,6 +278,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  closeDbConnection();
   if (existsSync(TEST_HOME)) {
     rmSync(TEST_HOME, { recursive: true, force: true });
   }

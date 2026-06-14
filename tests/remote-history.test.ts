@@ -40,6 +40,17 @@ function extractLocalRecoveryFunction(): string {
   return remainingCode.substring(0, endMatch);
 }
 
+function extractPrivateFunction(name: string, nextFunction: string): string {
+  const startMatch = hermesSrc.indexOf(`async function ${name}(`);
+  expect(startMatch).toBeGreaterThan(-1);
+
+  const remainingCode = hermesSrc.substring(startMatch);
+  const endMatch = remainingCode.indexOf(`\n${nextFunction}`);
+  expect(endMatch).toBeGreaterThan(-1);
+
+  return remainingCode.substring(0, endMatch);
+}
+
 /**
  * Test that sendMessage passes history parameter in remote mode.
  *
@@ -48,7 +59,7 @@ function extractLocalRecoveryFunction(): string {
  * single-turn requests.
  */
 describe("Remote/SSH Mode History Preservation", () => {
-  it("sendMessage passes history to the API transport in remote mode", () => {
+  it("sendMessage passes history to the best API transport in remote mode", () => {
     // Extract the sendMessage function's remote mode branch
     const remoteModeBranch = hermesSrc.match(
       /\/\/ Remote mode: always use API, no CLI fallback[\s\S]*?if \(isRemoteMode\(\)\) \{[\s\S]*?return sendMessageViaBestApi\([\s\S]*?\);[\s\S]*?\}/,
@@ -58,7 +69,7 @@ describe("Remote/SSH Mode History Preservation", () => {
 
     const branchCode = remoteModeBranch![0];
 
-    // Verify that the API transport is called with history parameter.
+    // Verify that sendMessageViaBestApi is called with history parameter.
     // Call signature is (message, cb, profile, resumeSessionId, history, attachments).
     const apiCallMatch = branchCode.match(
       /return sendMessageViaBestApi\(([\s\S]*?)\);/,
@@ -129,7 +140,35 @@ describe("Remote/SSH Mode History Preservation", () => {
     expect(hasHistoryArg(wrapperCallMatch![1])).toBe(true);
   });
 
-  it("local recovery wrapper forwards history to every best-API send", () => {
+  it("best API transport forwards history through the non-gateway transport", () => {
+    const bestApiCode = extractPrivateFunction(
+      "sendMessageViaBestApi",
+      "async function sendMessageViaBestApiWithLocalRecovery(",
+    );
+    const nonGatewayCall = bestApiCode.match(
+      /sendMessageViaNonGatewayApi\(([\s\S]*?)\);/,
+    );
+    expect(nonGatewayCall).toBeDefined();
+    expect(hasHistoryArg(nonGatewayCall![1])).toBe(true);
+  });
+
+  it("non-gateway API transport forwards history to every concrete transport", () => {
+    const nonGatewayCode = extractPrivateFunction(
+      "sendMessageViaNonGatewayApi",
+      "async function sendMessageViaBestApi(",
+    );
+    const transportCalls = Array.from(
+      nonGatewayCode.matchAll(/sendMessageVia(?:Runs|Api)\(([\s\S]*?)\);/g),
+    );
+
+    expect(transportCalls.length).toBeGreaterThanOrEqual(2);
+
+    for (const call of transportCalls) {
+      expect(hasHistoryArg(call[1])).toBe(true);
+    }
+  });
+
+  it("local recovery wrapper forwards history to every best API send", () => {
     const wrapperCode = extractLocalRecoveryFunction();
     const apiCalls = Array.from(
       wrapperCode.matchAll(/sendMessageViaBestApi\(([\s\S]*?)\);/g),

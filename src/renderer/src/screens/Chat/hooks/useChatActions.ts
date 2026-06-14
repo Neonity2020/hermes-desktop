@@ -1,14 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { ChatInputHandle } from "../ChatInput";
-import type { Attachment, ChatMessage, ChatBubbleMessage } from "../types";
-
-function hasContent(msg: ChatMessage): msg is ChatBubbleMessage {
-  return (
-    msg.kind === "user" ||
-    msg.kind === "assistant" ||
-    (!msg.kind && (msg.role === "user" || msg.role === "agent"))
-  );
-}
+import { createTurn, shouldSendToAgent } from "../chatMessages";
+import type { ActiveTurn, Attachment, ChatMessage } from "../types";
 
 interface LocalCommands {
   isLocal: (text: string) => boolean;
@@ -28,8 +21,14 @@ interface UseChatActionsArgs {
   onSessionStarted?: () => void;
   chatInputRef: React.RefObject<ChatInputHandle | null>;
   localCommands: LocalCommands;
+  activeTurnRef: React.MutableRefObject<ActiveTurn | null>;
   /** Working folder bound to this conversation (issue #27), or null. */
   contextFolder: string | null;
+  sendViaDashboard?: (
+    text: string,
+    attachments?: Attachment[],
+  ) => Promise<boolean>;
+  abortDashboard?: () => void;
 }
 
 interface UseChatActionsResult {
@@ -61,7 +60,10 @@ export function useChatActions({
   onSessionStarted,
   chatInputRef,
   localCommands,
+  activeTurnRef,
   contextFolder,
+  sendViaDashboard,
+  abortDashboard,
 }: UseChatActionsArgs): UseChatActionsResult {
   const messagesRef = useRef(messages);
   const isLoadingRef = useRef(isLoading);
@@ -72,15 +74,18 @@ export function useChatActions({
 
   const pushUser = useCallback(
     (content: string, idPrefix = "user", attachments?: Attachment[]) => {
+      const turn = createTurn(idPrefix);
       setMessages((prev) => [
         ...prev,
         {
-          id: `${idPrefix}-${Date.now()}`,
+          id: turn.userId,
           role: "user",
           content,
+          turnId: turn.turnId,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
       ]);
+      return turn;
     },
     [setMessages],
   );
@@ -88,11 +93,15 @@ export function useChatActions({
   const sendToAgent = useCallback(
     async (text: string, attachments?: Attachment[]): Promise<void> => {
       try {
+        if (sendViaDashboard) {
+          const handled = await sendViaDashboard(text, attachments);
+          if (handled) return;
+        }
         await window.hermesAPI.sendMessage(
           text,
           profile,
           hermesSessionId || undefined,
-          messagesRef.current.filter(hasContent).map((m) => ({
+          messagesRef.current.filter(shouldSendToAgent).map((m) => ({
             role: m.role,
             content: m.content,
           })),
@@ -104,7 +113,7 @@ export function useChatActions({
         // onChatError IPC already surfaces this to the user
       }
     },
-    [runId, profile, hermesSessionId, contextFolder],
+    [runId, profile, hermesSessionId, contextFolder, sendViaDashboard],
   );
 
   const handleSend = useCallback(
@@ -125,42 +134,71 @@ export function useChatActions({
       }
 
       setIsLoading(true);
-      pushUser(text, "user", attachments);
+      const turn = pushUser(text, "user", attachments);
+      activeTurnRef.current = {
+        ...turn,
+        startIndex: messagesRef.current.length,
+        status: "running",
+      };
       onSessionStarted?.();
       await sendToAgent(text, attachments);
     },
-    [localCommands, pushUser, onSessionStarted, sendToAgent, setIsLoading],
+    [
+      activeTurnRef,
+      localCommands,
+      pushUser,
+      onSessionStarted,
+      sendToAgent,
+      setIsLoading,
+    ],
   );
 
   const handleQuickAsk = useCallback(
     async (text: string, attachments?: Attachment[]): Promise<void> => {
       if (!text || isLoadingRef.current) return;
       setIsLoading(true);
-      pushUser(`💭 ${text}`, "user-btw", attachments);
+      const turn = pushUser(`💭 ${text}`, "user-btw", attachments);
+      activeTurnRef.current = {
+        ...turn,
+        startIndex: messagesRef.current.length,
+        status: "running",
+      };
       await sendToAgent(`/btw ${text}`, attachments);
     },
-    [pushUser, sendToAgent, setIsLoading],
+    [activeTurnRef, pushUser, sendToAgent, setIsLoading],
   );
 
   const handleAbort = useCallback(() => {
+    abortDashboard?.();
     window.hermesAPI.abortChat(runId);
+    activeTurnRef.current = null;
     setIsLoading(false);
     setTimeout(() => chatInputRef.current?.focus(), 50);
-  }, [runId, chatInputRef, setIsLoading]);
+  }, [abortDashboard, runId, activeTurnRef, chatInputRef, setIsLoading]);
 
   const handleApprove = useCallback(() => {
     chatInputRef.current?.clear();
     setIsLoading(true);
-    pushUser("/approve", "user-approve");
+    const turn = pushUser("/approve", "user-approve");
+    activeTurnRef.current = {
+      ...turn,
+      startIndex: messagesRef.current.length,
+      status: "running",
+    };
     sendToAgent("/approve").catch(() => setIsLoading(false));
-  }, [chatInputRef, pushUser, sendToAgent, setIsLoading]);
+  }, [activeTurnRef, chatInputRef, pushUser, sendToAgent, setIsLoading]);
 
   const handleDeny = useCallback(() => {
     chatInputRef.current?.clear();
     setIsLoading(true);
-    pushUser("/deny", "user-deny");
+    const turn = pushUser("/deny", "user-deny");
+    activeTurnRef.current = {
+      ...turn,
+      startIndex: messagesRef.current.length,
+      status: "running",
+    };
     sendToAgent("/deny").catch(() => setIsLoading(false));
-  }, [chatInputRef, pushUser, sendToAgent, setIsLoading]);
+  }, [activeTurnRef, chatInputRef, pushUser, sendToAgent, setIsLoading]);
 
   return { handleSend, handleQuickAsk, handleAbort, handleApprove, handleDeny };
 }

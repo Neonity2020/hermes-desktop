@@ -642,16 +642,12 @@ function Layout({
 
         {visitedViews.has("sessions") && (
           <div style={paneStyle("sessions")}>
-            {remoteMode ? (
-              <RemoteNotice feature="Sessions" />
-            ) : (
-              <Sessions
-                onResumeSession={handleResumeSession}
-                onNewChat={handleNewChat}
-                currentSessionId={currentSessionId}
-                visible={view === "sessions"}
-              />
-            )}
+            <Sessions
+              onResumeSession={handleResumeSession}
+              onNewChat={handleNewChat}
+              currentSessionId={currentSessionId}
+              visible={view === "sessions"}
+            />
           </div>
         )}
 

@@ -40,16 +40,22 @@ export interface SshConnectionConfig {
   localPort: number;
 }
 
+export type RemoteChatTransport = "auto" | "dashboard" | "legacy";
+
 export interface ConnectionConfig {
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
   apiKey: string;
+  remoteChatTransport: RemoteChatTransport;
+  sshChatTransport: RemoteChatTransport;
   ssh: SshConnectionConfig;
 }
 
 export interface PublicConnectionConfig {
   mode: "local" | "remote" | "ssh";
   remoteUrl: string;
+  remoteChatTransport: RemoteChatTransport;
+  sshChatTransport: RemoteChatTransport;
   hasApiKey: boolean;
   // Length of the stored API key, exposed so the renderer can show a
   // mask that matches the real value's width. The secret itself never
@@ -64,11 +70,17 @@ function desktopConfigFile(): string {
   return join(HERMES_HOME, "desktop.json");
 }
 
+export function normalizeRemoteChatTransport(
+  value: unknown,
+): RemoteChatTransport {
+  return value === "dashboard" || value === "legacy" ? value : "auto";
+}
+
 export function readDesktopConfig(): Record<string, unknown> {
   try {
     const f = desktopConfigFile();
     if (!existsSync(f)) return {};
-    return JSON.parse(readFileSync(f, "utf-8"));
+    return JSON.parse(readFileSync(f, "utf-8").replace(/^\uFEFF/, ""));
   } catch {
     return {};
   }
@@ -88,6 +100,10 @@ export function getConnectionConfig(): ConnectionConfig {
     mode: (data.connectionMode as "local" | "remote" | "ssh") || "local",
     remoteUrl: (data.remoteUrl as string) || "",
     apiKey: (data.remoteApiKey as string) || "",
+    remoteChatTransport: normalizeRemoteChatTransport(
+      data.remoteChatTransport,
+    ),
+    sshChatTransport: normalizeRemoteChatTransport(data.sshChatTransport),
     ssh: {
       host: (ssh.host as string) || "",
       port: (ssh.port as number) || 22,
@@ -104,6 +120,8 @@ export function getPublicConnectionConfig(): PublicConnectionConfig {
   return {
     mode: config.mode,
     remoteUrl: config.remoteUrl,
+    remoteChatTransport: config.remoteChatTransport,
+    sshChatTransport: config.sshChatTransport,
     hasApiKey: config.apiKey.length > 0,
     apiKeyLength: config.apiKey.length,
     ssh: config.ssh,
@@ -113,8 +131,18 @@ export function getPublicConnectionConfig(): PublicConnectionConfig {
 export function setConnectionConfig(config: ConnectionConfig): void {
   const data = readDesktopConfig();
   data.connectionMode = config.mode;
-  data.remoteUrl = config.remoteUrl;
-  data.remoteApiKey = config.apiKey;
+  if (config.mode === "remote" || config.remoteUrl.trim()) {
+    data.remoteUrl = config.remoteUrl;
+  }
+  if (config.mode === "remote" || config.apiKey.trim()) {
+    data.remoteApiKey = config.apiKey;
+  }
+  data.remoteChatTransport = normalizeRemoteChatTransport(
+    config.remoteChatTransport,
+  );
+  data.sshChatTransport = normalizeRemoteChatTransport(
+    config.sshChatTransport,
+  );
   if (config.mode === "ssh") {
     data.sshConfig = config.ssh;
   }
@@ -123,12 +151,12 @@ export function setConnectionConfig(config: ConnectionConfig): void {
 
 export function resolveConnectionApiKeyUpdate(
   existing: ConnectionConfig,
-  mode: "local" | "remote" | "ssh",
+  _mode: "local" | "remote" | "ssh",
   remoteUrl: string,
   apiKey?: string,
 ): string {
   if (apiKey !== undefined) return apiKey;
-  if (existing.mode === mode && existing.remoteUrl === remoteUrl) {
+  if (remoteUrl.trim() && existing.remoteUrl === remoteUrl) {
     return existing.apiKey;
   }
   return "";

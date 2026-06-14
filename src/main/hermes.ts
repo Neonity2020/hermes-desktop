@@ -34,7 +34,7 @@ import {
   getSshTunnelUrl,
   isSshTunnelActive,
   isSshTunnelHealthy,
-  startSshTunnel,
+  ensureSshTunnel,
 } from "./ssh-tunnel";
 import {
   pidIsAliveAs,
@@ -276,7 +276,7 @@ export async function ensureSshTunnelIfNeeded(): Promise<void> {
     conn.mode === "ssh" &&
     (!isSshTunnelActive() || !(await isSshTunnelHealthy()))
   ) {
-    await startSshTunnel(conn.ssh);
+    await ensureSshTunnel(conn.ssh);
   }
 }
 
@@ -976,6 +976,7 @@ export interface ChatCallbacks {
    *  (issue #352). */
   onReasoningChunk?: (text: string) => void;
   onDone: (sessionId?: string) => void;
+  onSessionStarted?: (sessionId: string) => void;
   onError: (error: string) => void;
   onToolProgress?: (tool: string) => void;
   onToolEvent?: (event: ChatToolEvent) => void;
@@ -1190,6 +1191,14 @@ function sendMessageViaApi(
   if (sessionId) {
     headers["X-Hermes-Session-Id"] = sessionId;
   }
+  let announcedSessionId = "";
+  function announceSessionId(id: string): void {
+    if (!id || announcedSessionId === id) return;
+    announcedSessionId = id;
+    cb.onSessionStarted?.(id);
+  }
+  announceSessionId(sessionId);
+
   let hasContent = false;
   let finished = false; // guard against double callbacks
   let lastError = ""; // capture embedded error messages
@@ -1367,7 +1376,10 @@ function sendMessageViaApi(
     },
     (res) => {
       const sid = res.headers["x-hermes-session-id"];
-      if (sid && typeof sid === "string") sessionId = sid;
+      if (sid && typeof sid === "string") {
+        sessionId = sid;
+        announceSessionId(sessionId);
+      }
 
       if (res.statusCode !== 200) {
         let errBody = "";
@@ -1499,16 +1511,16 @@ function sendMessageViaRuns(
   profile?: string,
   resumeSessionId?: string,
   history?: Array<{ role: string; content: string }>,
+  attachments?: Attachment[],
   contextFolder?: string,
 ): ChatHandle {
   const mc = getModelConfig(profile);
   const controller = new AbortController();
   const apiUrl = getApiUrl(profile);
+  const headersForAuth = getApiAuthHeaders(profile);
   const sessionId =
     resumeSessionId ||
-    (getApiAuthHeaders(profile).Authorization
-      ? `desk-${Date.now()}-${randomUUID()}`
-      : "");
+    (headersForAuth.Authorization ? `desk-${Date.now()}-${randomUUID()}` : "");
   const ctxSystem = contextFolderSystemMessage(contextFolder);
   const bodyObj: Record<string, unknown> = {
     model: mc.model || "hermes-agent",
@@ -1523,6 +1535,7 @@ function sendMessageViaRuns(
   const headers = getJsonApiHeaders(profile, bodyBuf);
   if (sessionId) {
     headers["X-Hermes-Session-Id"] = sessionId;
+    cb.onSessionStarted?.(sessionId);
   }
 
   let runId = "";
@@ -1552,7 +1565,7 @@ function sendMessageViaRuns(
       profile,
       resumeSessionId,
       history,
-      undefined,
+      attachments,
       contextFolder,
     );
   }
@@ -2399,12 +2412,13 @@ async function sendMessageViaNonGatewayApi(
       return sendMessageViaRuns(
         message,
         cb,
-        profile,
-        resumeSessionId,
-        history,
-        contextFolder,
-      );
-    }
+          profile,
+          resumeSessionId,
+          history,
+          attachments,
+          contextFolder,
+        );
+      }
   }
 
   return sendMessageViaApi(
@@ -2573,6 +2587,7 @@ async function sendMessageViaBestApiWithLocalRecovery(
         }
       : undefined,
     onUsage: cb.onUsage,
+    onSessionStarted: cb.onSessionStarted,
     onDone: (sessionId) => {
       settled = true;
       cb.onDone(sessionId);

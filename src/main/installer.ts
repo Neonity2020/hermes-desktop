@@ -24,6 +24,16 @@ import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 
 const IS_WINDOWS = process.platform === "win32";
 
+const HERMES_DESKTOP_USER_DATA_DIR =
+  process.env.HERMES_DESKTOP_USER_DATA_DIR?.trim();
+if (HERMES_DESKTOP_USER_DATA_DIR) {
+  try {
+    app.setPath("userData", HERMES_DESKTOP_USER_DATA_DIR);
+  } catch {
+    /* best effort: Electron may reject late path changes in tests */
+  }
+}
+
 // Resolve the Hermes data directory. Precedence:
 //   1. HERMES_HOME env var if set (install.ps1 sets it User-scope on
 //      Windows; users may also override manually for WSL/custom setups).
@@ -160,6 +170,14 @@ export function hermesCliArgs(args: string[] = []): string[] {
     return ["-m", "hermes_cli.main", ...args];
   }
   return [HERMES_SCRIPT, ...args];
+}
+
+function canInvokeHermesCli(): boolean {
+  if (!existsSync(HERMES_PYTHON)) return false;
+  if (IS_WINDOWS) {
+    return existsSync(join(HERMES_REPO, "hermes_cli", "main.py"));
+  }
+  return existsSync(HERMES_SCRIPT);
 }
 
 export interface InstallStatus {
@@ -501,7 +519,7 @@ let _verifyCache: { ok: boolean; ts: number } | null = null;
 const VERIFY_TTL_MS = 5 * 60 * 1000;
 
 export async function verifyInstall(): Promise<boolean> {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) return false;
+  if (!canInvokeHermesCli()) return false;
   if (_verifyCache && Date.now() - _verifyCache.ts < VERIFY_TTL_MS) {
     return _verifyCache.ok;
   }
@@ -535,7 +553,7 @@ let _versionFetching = false;
 
 export async function getHermesVersion(): Promise<string | null> {
   if (_cachedVersion !== null) return _cachedVersion;
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) return null;
+  if (!canInvokeHermesCli()) return null;
   if (_versionFetching) {
     // Wait for the in-flight fetch but cap the wait. The execFile below
     // has a 15s timeout and its callback unconditionally clears
@@ -590,7 +608,7 @@ export function clearVersionCache(): void {
 }
 
 export function runHermesDoctor(): string {
-  if (!existsSync(HERMES_PYTHON) || !existsSync(HERMES_SCRIPT)) {
+  if (!canInvokeHermesCli()) {
     return "Hermes is not installed.";
   }
   try {
@@ -1011,6 +1029,8 @@ async function runInstallWindows(emit: (t: string) => void): Promise<void> {
   // with our parameters. This sidesteps the `iex`-can't-pass-args limitation.
   const wrapperScript = [
     "$ErrorActionPreference = 'Stop'",
+    `$hermesHome = ${psQuote(hermesHome)}`,
+    `$installDir = ${psQuote(installDir)}`,
     // Force TLS 1.2 for older Windows PowerShell 5.1 hosts that still default
     // to TLS 1.0 — github raw refuses TLS < 1.2.
     "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}",
@@ -1024,8 +1044,24 @@ async function runInstallWindows(emit: (t: string) => void): Promise<void> {
     "$text = if ($resp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($resp.Content) } else { [string]$resp.Content }",
     "if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }",
     "[System.IO.File]::WriteAllText($installer, $text, (New-Object System.Text.UTF8Encoding $true))",
-    `& $installer -SkipSetup -HermesHome ${psQuote(hermesHome)} -InstallDir ${psQuote(installDir)}`,
-    "$exit = $LASTEXITCODE",
+    "$exit = 1",
+    "try {",
+    "  & $installer -SkipSetup -NonInteractive -HermesHome $hermesHome -InstallDir $installDir",
+    "  $exit = $LASTEXITCODE",
+    "} finally {",
+    "  if ($env:HERMES_DESKTOP_SANDBOX -eq '1') {",
+    "    $sandboxVenv = Join-Path $installDir 'venv\\Scripts'",
+    "    $userHermesHome = [Environment]::GetEnvironmentVariable('HERMES_HOME', 'User')",
+    "    if ($userHermesHome -and ($userHermesHome.TrimEnd('\\') -ieq $hermesHome.TrimEnd('\\'))) {",
+    "      [Environment]::SetEnvironmentVariable('HERMES_HOME', $null, 'User')",
+    "    }",
+    "    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')",
+    "    if ($userPath) {",
+    "      $parts = $userPath -split ';' | Where-Object { $_ -and ($_.TrimEnd('\\') -ine $sandboxVenv.TrimEnd('\\')) }",
+    "      [Environment]::SetEnvironmentVariable('Path', ($parts -join ';'), 'User')",
+    "    }",
+    "  }",
+    "}",
     "Remove-Item -Force -ErrorAction SilentlyContinue $installer",
     "exit $exit",
     "",

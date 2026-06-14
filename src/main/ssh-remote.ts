@@ -7,6 +7,7 @@
 import { spawn } from "child_process";
 import { homedir } from "os";
 import { join } from "path";
+import { existsSync } from "fs";
 import type { SshConfig } from "./ssh-tunnel";
 import type { KanbanTask } from "./kanban";
 import { buildSshControlOptions } from "./ssh-options";
@@ -16,9 +17,15 @@ import {
   type SkillSearchResult,
 } from "./skills";
 import type { MemoryInfo } from "./memory";
-import type { SessionSummary, SearchResult } from "./sessions";
+import type { HistoryItem, SessionSummary, SearchResult } from "./sessions";
 import type { CachedSession } from "./session-cache";
+import type { Attachment } from "../shared/attachments";
+import { isImageMime, MAX_IMAGE_BYTES } from "../shared/attachments";
 import type { ToolsetInfo } from "./tools";
+import {
+  extractLeadingVisionImageFallback,
+  stripTrailingImagePlaceholders,
+} from "./session-attachment-store";
 import { DEFAULT_MESSAGING_PLATFORM_TOOLSETS } from "../shared/messaging-platforms";
 import type { SavedModel } from "./models";
 import type { MemoryProviderInfo } from "./installer";
@@ -53,6 +60,11 @@ export function sshExec(
   timeoutMs = 30000,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
+    const keyPath = config.keyPath?.trim() || join(homedir(), ".ssh", "id_rsa");
+    if (!existsSync(keyPath)) {
+      return reject(new Error(`SSH private key file not found at: ${keyPath}`));
+    }
+
     const child = spawn("ssh", [...buildExecArgs(config), command], {
       stdio: ["pipe", "pipe", "pipe"],
       ...HIDDEN_SUBPROCESS_OPTIONS,
@@ -73,7 +85,15 @@ export function sshExec(
     });
     child.on("error", (err) => {
       clearTimeout(timeout);
-      reject(err);
+      if (err && "code" in err && err.code === "ENOENT") {
+        reject(
+          new Error(
+            "System SSH binary not found on your system PATH. Please ensure an SSH client is installed.",
+          ),
+        );
+      } else {
+        reject(err);
+      }
     });
     child.on("close", (code) => {
       clearTimeout(timeout);
@@ -141,7 +161,7 @@ async function sshReadFile(
   try {
     return await sshExec(
       config,
-      `bash -c 'case "$1" in "~/"*) p="$HOME/\${1#~/}" ;; "\\$HOME/"*) p="$HOME/\${1#\\$HOME/}" ;; *) p="$1" ;; esac; cat -- "$p" 2>/dev/null || true' -- ${shellQuote(normalizeRemotePath(remotePath))}`,
+      `sh -c 'case "$1" in "~/"*) p="$HOME/\${1#~/}" ;; "\\$HOME/"*) p="$HOME/\${1#\\$HOME/}" ;; *) p="$1" ;; esac; cat -- "$p" 2>/dev/null || true' -- ${shellQuote(normalizeRemotePath(remotePath))}`,
     );
   } catch {
     return "";
@@ -157,7 +177,7 @@ async function sshWriteFile(
   const dir = p.includes("/") ? p.substring(0, p.lastIndexOf("/")) : ".";
   await sshExec(
     config,
-    `bash -c 'expand(){ case "$1" in "~/"*) printf "%s" "$HOME/\${1#~/}" ;; "\\$HOME/"*) printf "%s" "$HOME/\${1#\\$HOME/}" ;; *) printf "%s" "$1" ;; esac; }; dir=$(expand "$1"); file=$(expand "$2"); mkdir -p -- "$dir" && cat > "$file"' -- ${shellQuote(dir)} ${shellQuote(p)}`,
+    `sh -c 'expand(){ case "$1" in "~/"*) printf "%s" "$HOME/\${1#~/}" ;; "\\$HOME/"*) printf "%s" "$HOME/\${1#\\$HOME/}" ;; *) printf "%s" "$1" ;; esac; }; dir=$(expand "$1"); file=$(expand "$2"); mkdir -p -- "$dir" && cat > "$file"' -- ${shellQuote(dir)} ${shellQuote(p)}`,
     content,
   );
 }
@@ -1234,7 +1254,7 @@ export async function sshGetSessionMessages(
   config: SshConfig,
   sessionId: string,
   profile?: string,
-): Promise<import("./sessions").HistoryItem[]> {
+): Promise<HistoryItem[]> {
   // Mirror the local getSessionMessages logic over SSH: widen the SELECT to
   // include tool_calls / tool_name / tool_call_id / reasoning columns, then
   // expand each row into one or more HistoryItem entries. Kept inline in
@@ -1360,10 +1380,123 @@ conn.close()
       script,
       pythonJsonInput({ profile, sessionId }),
     );
-    return JSON.parse(out.trim() || "[]");
+    const items = JSON.parse(out.trim() || "[]") as HistoryItem[];
+    return hydrateSshPromptImageAttachments(config, items);
   } catch {
     return [];
   }
+}
+
+function sshImageName(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() || "image";
+}
+
+function attachmentFromSshDataUrl(
+  dataUrl: string | null,
+  filePath: string,
+  id: string,
+): Attachment | null {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(dataUrl || "");
+  if (!match) return null;
+  const mime = match[1].toLowerCase();
+  if (!isImageMime(mime)) return null;
+  const size = Buffer.byteLength(match[2], "base64");
+  if (size <= 0 || size > MAX_IMAGE_BYTES) return null;
+  return {
+    id,
+    kind: "image",
+    name: sshImageName(filePath),
+    mime,
+    size,
+    dataUrl: dataUrl || "",
+    path: filePath,
+  };
+}
+
+async function sshReadImageAsDataUrl(
+  config: SshConfig,
+  filePath: string,
+): Promise<string | null> {
+  const script = `
+import base64, json, mimetypes, os, sys
+payload = json.load(sys.stdin)
+path = payload.get("path") or ""
+max_bytes = int(payload.get("maxBytes") or 0)
+if not path:
+    print(json.dumps({"data_url": None})); sys.exit(0)
+path = os.path.expanduser(path)
+try:
+    st = os.stat(path)
+    if not os.path.isfile(path) or st.st_size <= 0 or (max_bytes and st.st_size > max_bytes):
+        print(json.dumps({"data_url": None})); sys.exit(0)
+    mime = mimetypes.guess_type(path)[0] or "application/octet-stream"
+    if not mime.startswith("image/"):
+        print(json.dumps({"data_url": None})); sys.exit(0)
+    with open(path, "rb") as fh:
+        data = fh.read(max_bytes + 1 if max_bytes else -1)
+    if max_bytes and len(data) > max_bytes:
+        print(json.dumps({"data_url": None})); sys.exit(0)
+    print(json.dumps({"data_url": "data:%s;base64,%s" % (mime, base64.b64encode(data).decode("ascii"))}))
+except Exception:
+    print(json.dumps({"data_url": None}))
+`;
+  try {
+    const out = await sshPython(
+      config,
+      script,
+      pythonJsonInput({ path: filePath, maxBytes: MAX_IMAGE_BYTES }),
+      30000,
+    );
+    const parsed = JSON.parse(out.trim() || "{}") as { data_url?: unknown };
+    return typeof parsed.data_url === "string" ? parsed.data_url : null;
+  } catch {
+    return null;
+  }
+}
+
+async function hydrateSshPromptImageAttachments(
+  config: SshConfig,
+  items: HistoryItem[],
+): Promise<HistoryItem[]> {
+  const hydrated: HistoryItem[] = [];
+  const cache = new Map<string, Promise<string | null>>();
+
+  for (const item of items) {
+    if (item.kind !== "user") {
+      hydrated.push(item);
+      continue;
+    }
+
+    const fallback = extractLeadingVisionImageFallback(item.content);
+    if (!fallback.imagePath) {
+      hydrated.push(item);
+      continue;
+    }
+
+    const nextContent = stripTrailingImagePlaceholders(fallback.content);
+    if (item.attachments?.length) {
+      hydrated.push({ ...item, content: nextContent });
+      continue;
+    }
+
+    const dataUrlPromise =
+      cache.get(fallback.imagePath) ??
+      sshReadImageAsDataUrl(config, fallback.imagePath);
+    cache.set(fallback.imagePath, dataUrlPromise);
+    const attachment = attachmentFromSshDataUrl(
+      await dataUrlPromise,
+      fallback.imagePath,
+      `ssh-fallback-att-${item.id}-0`,
+    );
+
+    hydrated.push({
+      ...item,
+      content: nextContent,
+      ...(attachment ? { attachments: [attachment] } : {}),
+    });
+  }
+
+  return hydrated;
 }
 
 export async function sshSearchSessions(
@@ -1385,12 +1518,25 @@ conn = sqlite3.connect(db)
 conn.row_factory = sqlite3.Row
 try:
     rows = conn.execute(
-        "SELECT DISTINCT s.id, s.title, s.started_at, s.source, s.message_count, s.model, m.content as snippet "
-        "FROM sessions s JOIN messages m ON m.session_id = s.id "
-        "WHERE m.content LIKE ? ORDER BY s.started_at DESC LIMIT ?",
-        (f"%{query}%", limit)
+        "SELECT s.id, s.title, s.started_at, s.source, s.message_count, s.model, m.content as snippet "
+        "FROM sessions s LEFT JOIN messages m ON m.session_id = s.id "
+        "WHERE lower(coalesce(s.title, '')) LIKE lower(?) "
+        "OR lower(s.id) LIKE lower(?) "
+        "OR lower(coalesce(m.content, '')) LIKE lower(?) "
+        "ORDER BY s.started_at DESC, m.timestamp ASC, m.id ASC LIMIT ?",
+        (f"%{query}%", f"%{query}%", f"%{query}%", max(limit * 8, 50))
     ).fetchall()
-    print(json.dumps([{"sessionId": r["id"], "title": r["title"], "startedAt": r["started_at"], "source": r["source"] or "cli", "messageCount": r["message_count"] or 0, "model": r["model"] or "", "snippet": (r["snippet"] or "")[:200]} for r in rows]))
+    seen = set()
+    result = []
+    for r in rows:
+        if r["id"] in seen:
+            continue
+        seen.add(r["id"])
+        snippet = r["snippet"] or r["title"] or ("Session " + r["id"][-6:])
+        result.append({"sessionId": r["id"], "title": r["title"], "startedAt": r["started_at"], "source": r["source"] or "cli", "messageCount": r["message_count"] or 0, "model": r["model"] or "", "snippet": snippet[:500]})
+        if len(result) >= limit:
+            break
+    print(json.dumps(result))
 except Exception as e:
     print("[]")
 conn.close()
@@ -1877,7 +2023,7 @@ export async function sshReadLogs(
     );
     const content = await sshExec(
       config,
-      `bash -c 'case "$2" in "~/"*) p="$HOME/\${2#~/}" ;; "\\$HOME/"*) p="$HOME/\${2#\\$HOME/}" ;; *) p="$2" ;; esac; tail -n "$1" -- "$p" 2>/dev/null || echo ""' -- ${shellQuote(String(safeLines))} ${shellQuote(remotePath)}`,
+      `sh -c 'case "$2" in "~/"*) p="$HOME/\${2#~/}" ;; "\\$HOME/"*) p="$HOME/\${2#\\$HOME/}" ;; *) p="$2" ;; esac; tail -n "$1" -- "$p" 2>/dev/null || echo ""' -- ${shellQuote(String(safeLines))} ${shellQuote(remotePath)}`,
     );
     return { content: content.trim(), path: `~/.hermes/logs/${file}` };
   } catch {
@@ -2045,7 +2191,7 @@ export function buildRemoteHermesCmd(args: string[], extraShell = ""): string {
     .map((p) => `[ -x ${p} ] && exec ${p} ${quotedArgs}${extraShell}`)
     .join("; ");
   const script = `${probe}; command -v hermes >/dev/null && exec hermes ${quotedArgs}${extraShell}; echo "ERR: hermes CLI not found on remote PATH or in any known venv location" >&2; exit 1`;
-  return `bash -c ${shellQuote(script)}`;
+  return `sh -c ${shellQuote(script)}`;
 }
 
 export async function sshRunDoctor(config: SshConfig): Promise<string> {

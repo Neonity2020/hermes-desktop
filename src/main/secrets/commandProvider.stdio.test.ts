@@ -11,6 +11,13 @@ import { CommandSecretsProvider, helperExecOptions } from "./commandProvider";
 const mockedGetConfigValue = vi.mocked(getConfigValue);
 
 describe("CommandSecretsProvider stdio hygiene (F6)", () => {
+  if (process.platform === "win32") {
+    it("is POSIX-only and is covered by integration tests on non-Windows hosts", () => {
+      expect(process.platform).toBe("win32");
+    });
+    return;
+  }
+
   const provider = new CommandSecretsProvider();
   let stderrSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;

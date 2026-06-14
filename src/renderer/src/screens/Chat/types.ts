@@ -15,6 +15,14 @@ export interface ChatBubbleMessage {
   role: "user" | "agent";
   content: string;
   attachments?: Attachment[];
+  /** Renderer-local or streamed assistant failure metadata. */
+  error?: string;
+  /** True while an optimistic assistant bubble is still being finalized. */
+  pending?: boolean;
+  /** True for UI-only messages that do not have a canonical state.db row. */
+  localOnly?: boolean;
+  /** Renderer-local turn identity used to anchor local failures. */
+  turnId?: string;
 }
 
 /**
@@ -74,6 +82,13 @@ export type ChatMessage =
   | ToolCallMessage
   | ToolResultMessage
   | ClarifyMessage;
+
+export interface ActiveTurn {
+  turnId: string;
+  userId: string;
+  startIndex: number;
+  status: "running" | "failed" | "completed";
+}
 
 export interface ModelGroup {
   provider: string;

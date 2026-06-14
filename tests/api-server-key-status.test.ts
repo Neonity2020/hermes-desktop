@@ -14,6 +14,8 @@ import { tmpdir } from "os";
  */
 
 const TEST_DIR = join(tmpdir(), `hermes-test-key-status-${Date.now()}`);
+const itPosix = process.platform === "win32" ? it.skip : it;
+const ORIGINAL_API_SERVER_KEY = process.env.API_SERVER_KEY;
 
 async function freshConfig(
   home: string,
@@ -32,14 +34,15 @@ beforeEach(() => {
 
 afterEach(() => {
   delete process.env.HERMES_HOME;
-  delete process.env.API_SERVER_KEY;
+  if (ORIGINAL_API_SERVER_KEY === undefined) delete process.env.API_SERVER_KEY;
+  else process.env.API_SERVER_KEY = ORIGINAL_API_SERVER_KEY;
   vi.restoreAllMocks();
   vi.resetModules();
   rmSync(TEST_DIR, { recursive: true, force: true });
 });
 
 describe("getApiServerKeyStatus", () => {
-  it("reports hasKey=true, providerId='command' for a vault-resolved key", async () => {
+  itPosix("reports hasKey=true, providerId='command' for a vault-resolved key", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       [
@@ -71,7 +74,7 @@ describe("getApiServerKeyStatus", () => {
     expect(status.providerId).toBe("env");
   });
 
-  it("reports hasKey=false with the configured providerId when nothing resolves", async () => {
+  itPosix("reports hasKey=false with the configured providerId when nothing resolves", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       ["secrets:", "  provider: command", '  command: "exit 0"', ""].join("\n"),
@@ -99,7 +102,7 @@ describe("getApiServerKeyStatus", () => {
 });
 
 describe("getApiServerKey missing-key diagnostic", () => {
-  it("warns exactly once per (provider, profile) pair, naming the provider", async () => {
+  itPosix("warns exactly once per (provider, profile) pair, naming the provider", async () => {
     writeFileSync(
       join(TEST_DIR, "config.yaml"),
       ["secrets:", "  provider: command", '  command: "exit 0"', ""].join("\n"),

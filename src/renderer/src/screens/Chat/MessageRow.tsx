@@ -95,6 +95,7 @@ export const MessageRow = memo(function MessageRow({
 
   const showApprovalBar =
     msg.role === "agent" &&
+    !msg.error &&
     !isLoading &&
     isLast &&
     APPROVAL_RE.test(msg.content);
@@ -113,7 +114,11 @@ export const MessageRow = memo(function MessageRow({
       ) : (
         <HermesAvatar />
       )}
-      <div className={`chat-bubble chat-bubble-${msg.role}`}>
+      <div
+        className={`chat-bubble chat-bubble-${msg.role}${
+          msg.error ? " chat-bubble-error" : ""
+        }`}
+      >
         {hasAttachments && (
           <div className="chat-message-attachments">
             {msg.attachments!.map((att) => (
@@ -145,6 +150,11 @@ export const MessageRow = memo(function MessageRow({
                 ),
               )
             : msg.content)}
+        {msg.error && (
+          <div className="chat-error-message" role="alert">
+            {msg.error}
+          </div>
+        )}
       </div>
       {showApprovalBar && (
         <div className="chat-approval-bar">

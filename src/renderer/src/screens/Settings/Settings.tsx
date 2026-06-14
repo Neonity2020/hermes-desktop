@@ -19,6 +19,18 @@ import {
 import { ConfigHealth } from "./ConfigHealth";
 
 const DISCORD_COMMUNITY_URL = "https://discord.gg/vMwcnNPHc";
+type RemoteChatTransport = "auto" | "dashboard" | "legacy";
+const CHAT_TRANSPORT_OPTIONS: RemoteChatTransport[] = [
+  "auto",
+  "dashboard",
+  "legacy",
+];
+type TransportProbe = {
+  detail: string;
+  kind: "muted" | "ok" | "warn";
+  label: string;
+  loading: boolean;
+};
 
 const LANGUAGE_NATIVE_NAMES: Record<AppLocale, string> = {
   en: "English",
@@ -44,12 +56,59 @@ function makeApiKeyMask(length: number): string {
   return "*".repeat(n);
 }
 
-// Read cached values from localStorage for instant display
-function getCachedVersion(): string | null {
+type PublicConnectionSnapshot = {
+  mode: "local" | "remote" | "ssh";
+  remoteUrl: string;
+  ssh?: {
+    host: string;
+    keyPath: string;
+    localPort: number;
+    port: number;
+    remotePort: number;
+    username: string;
+  };
+};
+
+function versionCacheKey(
+  conn: PublicConnectionSnapshot,
+  profile?: string,
+): string {
+  const profileKey = profile || "default";
+  if (conn.mode === "remote") {
+    return `remote:${conn.remoteUrl.trim() || "unset"}:${profileKey}`;
+  }
+  if (conn.mode === "ssh") {
+    const ssh = conn.ssh;
+    return [
+      "ssh",
+      ssh?.username || "",
+      ssh?.host || "",
+      ssh?.port || "",
+      ssh?.remotePort || "",
+      ssh?.localPort || "",
+      profileKey,
+    ].join(":");
+  }
+  return `local:${profileKey}`;
+}
+
+function versionCacheStorageKey(cacheKey: string): string {
+  return `hermes-version-cache:${cacheKey}`;
+}
+
+function getCachedVersion(cacheKey: string): string | null {
   try {
-    return localStorage.getItem("hermes-version-cache");
+    return localStorage.getItem(versionCacheStorageKey(cacheKey));
   } catch {
     return null;
+  }
+}
+
+function setCachedVersion(cacheKey: string, version: string): void {
+  try {
+    localStorage.setItem(versionCacheStorageKey(cacheKey), version);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -68,10 +127,7 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
   const { theme, setTheme, rounded, setRounded } = useTheme();
   const { font, setFont } = useFont();
 
-  // Hermes engine info — initialize from localStorage cache for instant display
-  const [hermesVersion, setHermesVersion] = useState<string | null>(
-    getCachedVersion,
-  );
+  const [hermesVersion, setHermesVersion] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const [doctorOutput, setDoctorOutput] = useState<string | null>(null);
   const [doctorRunning, setDoctorRunning] = useState(false);
@@ -106,6 +162,10 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
   const [connApiKey, setConnApiKey] = useState("");
   const [connApiKeyMask, setConnApiKeyMask] = useState("");
   const [connHasApiKey, setConnHasApiKey] = useState(false);
+  const [remoteChatTransport, setRemoteChatTransport] =
+    useState<RemoteChatTransport>("auto");
+  const [sshChatTransport, setSshChatTransport] =
+    useState<RemoteChatTransport>("auto");
   const [connTesting, setConnTesting] = useState(false);
   const [connStatus, setConnStatus] = useState<string | null>(null);
   const connLoaded = useRef(false);
@@ -118,6 +178,10 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
   const [sshUser, setSshUser] = useState("");
   const [sshKeyPath, setSshKeyPath] = useState("");
   const [sshRemotePort, setSshRemotePort] = useState("");
+  const [sshLocalPort, setSshLocalPort] = useState("");
+  const [transportProbe, setTransportProbe] = useState<TransportProbe | null>(
+    null,
+  );
 
   // Backup / Import state
   const [backingUp, setBackingUp] = useState(false);
@@ -146,20 +210,30 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
   const [analyticsEnabled, setAnalyticsEnabled] = useState(() =>
     getAnalyticsConsent(),
   );
+  const loadConfigRequestRef = useRef(0);
 
   const loadConfig = useCallback(async (): Promise<void> => {
+    const requestId = ++loadConfigRequestRef.current;
+    setHermesHome("");
+    setHermesVersion(null);
+
     // Load fast config first (cached in main process)
-    const [home, aVersion, conn, keyStatus] = await Promise.all([
-      window.hermesAPI.getHermesHome(profile),
+    const [aVersion, conn, keyStatus] = await Promise.all([
       window.hermesAPI.getAppVersion(),
       window.hermesAPI.getConnectionConfig(),
       window.hermesAPI.getApiServerKeyStatus(profile),
     ]);
-    setHermesHome(home);
+
+    if (requestId !== loadConfigRequestRef.current) return;
+
+    const cacheKey = versionCacheKey(conn, profile);
+    setHermesVersion(getCachedVersion(cacheKey));
     setAppVersion(aVersion);
     setConnMode(conn.mode);
     setConnRemoteUrl(conn.remoteUrl);
     setConnHasApiKey(conn.hasApiKey);
+    setRemoteChatTransport(conn.remoteChatTransport ?? "auto");
+    setSshChatTransport(conn.sshChatTransport ?? "auto");
     const mask = conn.hasApiKey ? makeApiKeyMask(conn.apiKeyLength) : "";
     setConnApiKeyMask(mask);
     setConnApiKey(mask);
@@ -168,8 +242,30 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
     setSshUser(conn.ssh?.username || "");
     setSshKeyPath(conn.ssh?.keyPath || "");
     setSshRemotePort(conn.ssh?.remotePort ? String(conn.ssh.remotePort) : "");
+    setSshLocalPort(conn.ssh?.localPort ? String(conn.ssh.localPort) : "");
     setApiServerKeyMissing(!keyStatus.hasKey);
     connLoaded.current = true;
+
+    const homeResult = await Promise.resolve()
+      .then(() => window.hermesAPI.getHermesHome(profile))
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason) => ({ status: "rejected" as const, reason }),
+      );
+    const versionResult = await Promise.resolve()
+      .then(() => window.hermesAPI.getHermesVersion())
+      .then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (reason) => ({ status: "rejected" as const, reason }),
+      );
+
+    if (requestId !== loadConfigRequestRef.current) return;
+
+    setHermesHome(homeResult.status === "fulfilled" ? homeResult.value : "");
+    const version =
+      versionResult.status === "fulfilled" ? versionResult.value : null;
+    setHermesVersion(version);
+    if (version) setCachedVersion(cacheKey, version);
 
     // Load network settings from config.yaml
     window.hermesAPI.getConfig("network.force_ipv4", profile).then((v) => {
@@ -180,18 +276,6 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
       setHttpProxy(loadedProxy);
       httpProxyRef.current = loadedProxy;
       savedHttpProxyRef.current = loadedProxy.trim();
-    });
-
-    // Defer slow calls — background refresh, cached values show instantly
-    window.hermesAPI.getHermesVersion().then((v) => {
-      setHermesVersion(v);
-      if (v) {
-        try {
-          localStorage.setItem("hermes-version-cache", v);
-        } catch {
-          /* ignore */
-        }
-      }
     });
 
     if (localStorage.getItem("hermes-openclaw-dismissed") !== "true") {
@@ -209,6 +293,13 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
 
   useEffect(() => {
     void Promise.resolve().then(loadConfig);
+  }, [loadConfig]);
+
+  useEffect(() => {
+    const unsubscribe = window.hermesAPI.onConnectionConfigChanged(() => {
+      void loadConfig();
+    });
+    return unsubscribe;
   }, [loadConfig]);
 
   const saveHttpProxy = useCallback(async (): Promise<void> => {
@@ -285,16 +376,87 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
     return connApiKey.trim();
   }
 
+  async function saveSshConnectionMode(): Promise<void> {
+    await window.hermesAPI.setSshConfig(
+      sshHost.trim(),
+      parseInt(sshPort, 10) || 22,
+      sshUser.trim(),
+      sshKeyPath.trim(),
+      parseInt(sshRemotePort, 10) || 8642,
+      parseInt(sshLocalPort, 10) || 18642,
+    );
+  }
+
+  const refreshTransportProbe = useCallback(async (): Promise<void> => {
+    if (connMode === "local") {
+      setTransportProbe(null);
+      return;
+    }
+    const preference =
+      connMode === "ssh" ? sshChatTransport : remoteChatTransport;
+    if (preference === "legacy") {
+      setTransportProbe({
+        label: "Active: Legacy",
+        detail:
+          connMode === "ssh"
+            ? "Dashboard over SSH is disabled."
+            : "Dashboard WebSocket is disabled.",
+        kind: "muted",
+        loading: false,
+      });
+      return;
+    }
+
+    setTransportProbe((prev) => ({
+      label: prev?.label || "Checking transport…",
+      detail: prev?.detail || "",
+      kind: prev?.kind || "muted",
+      loading: true,
+    }));
+
+    try {
+      const status = await window.hermesAPI.dashboardStatus(profile);
+      if (status.running && status.connection?.baseUrl) {
+        setTransportProbe({
+          label:
+            preference === "dashboard"
+              ? "Active: Dashboard"
+              : "Auto active: Dashboard",
+          detail: status.connection.baseUrl,
+          kind: "ok",
+          loading: false,
+        });
+        return;
+      }
+      setTransportProbe({
+        label:
+          preference === "dashboard"
+            ? "Dashboard unavailable"
+            : "Auto active: Legacy fallback",
+        detail: status.error || "Dashboard transport is not available.",
+        kind: "warn",
+        loading: false,
+      });
+    } catch (err) {
+      setTransportProbe({
+        label:
+          preference === "dashboard"
+            ? "Dashboard unavailable"
+            : "Auto active: Legacy fallback",
+        detail: err instanceof Error ? err.message : String(err),
+        kind: "warn",
+        loading: false,
+      });
+    }
+  }, [connMode, profile, remoteChatTransport, sshChatTransport]);
+
+  useEffect(() => {
+    void refreshTransportProbe();
+  }, [refreshTransportProbe]);
+
   async function handleSaveConnection(): Promise<void> {
     if (connMode === "ssh") {
-      await window.hermesAPI.setSshConfig(
-        sshHost.trim(),
-        parseInt(sshPort, 10) || 22,
-        sshUser.trim(),
-        sshKeyPath.trim(),
-        parseInt(sshRemotePort, 10) || 8642,
-        18642,
-      );
+      await saveSshConnectionMode();
     } else {
       const apiKey = getConnectionApiKeyForSave();
       await window.hermesAPI.setConnectionConfig(
@@ -314,8 +476,32 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
         }
       }
     }
+    await window.hermesAPI.setConnectionChatTransports(
+      remoteChatTransport,
+      sshChatTransport,
+    );
+    await loadConfig();
     setConnStatus("Saved");
     setTimeout(() => setConnStatus(null), 2000);
+    void refreshTransportProbe();
+  }
+
+  async function handleChatTransportChange(
+    mode: "remote" | "ssh",
+    transport: RemoteChatTransport,
+  ): Promise<void> {
+    const nextRemote =
+      mode === "remote" ? transport : remoteChatTransport;
+    const nextSsh = mode === "ssh" ? transport : sshChatTransport;
+    if (mode === "remote") {
+      setRemoteChatTransport(transport);
+    } else {
+      setSshChatTransport(transport);
+    }
+    await window.hermesAPI.setConnectionChatTransports(nextRemote, nextSsh);
+    setConnStatus("Saved");
+    setTimeout(() => setConnStatus(null), 2000);
+    void refreshTransportProbe();
   }
 
   async function handleTestConnection(): Promise<void> {
@@ -354,13 +540,59 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
 
   async function handleSwitchToLocal(): Promise<void> {
     setConnMode("local");
-    setConnRemoteUrl("");
-    setConnApiKey("");
-    setConnApiKeyMask("");
-    setConnHasApiKey(false);
-    await window.hermesAPI.setConnectionConfig("local", "", "");
+    await window.hermesAPI.setConnectionConfig(
+      "local",
+      connRemoteUrl.trim(),
+      undefined,
+    );
+    await loadConfig();
     setConnStatus(t("settings.switchedToLocal"));
     setTimeout(() => setConnStatus(null), 2000);
+  }
+
+  async function handleSwitchToRemote(): Promise<void> {
+    setConnMode("remote");
+    if (!connLoaded.current) return;
+
+    const apiKey = getConnectionApiKeyForSave();
+    await window.hermesAPI.setConnectionConfig(
+      "remote",
+      connRemoteUrl.trim(),
+      apiKey,
+    );
+    await window.hermesAPI.setConnectionChatTransports(
+      remoteChatTransport,
+      sshChatTransport,
+    );
+    if (apiKey !== undefined) {
+      const hasApiKey = apiKey.length > 0;
+      setConnHasApiKey(hasApiKey);
+      if (hasApiKey) {
+        const mask = makeApiKeyMask(apiKey.length);
+        setConnApiKeyMask(mask);
+        setConnApiKey(mask);
+      } else {
+        setConnApiKeyMask("");
+      }
+    }
+    await loadConfig();
+    setConnStatus("Saved");
+    setTimeout(() => setConnStatus(null), 2000);
+    void refreshTransportProbe();
+  }
+
+  async function handleSwitchToSsh(): Promise<void> {
+    setConnMode("ssh");
+    if (!connLoaded.current) return;
+    await saveSshConnectionMode();
+    await window.hermesAPI.setConnectionChatTransports(
+      remoteChatTransport,
+      sshChatTransport,
+    );
+    await loadConfig();
+    setConnStatus("Saved");
+    setTimeout(() => setConnStatus(null), 2000);
+    void refreshTransportProbe();
   }
 
   async function handleBackup(): Promise<void> {
@@ -412,16 +644,22 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
 
   // Helper to fetch fresh version, clear backend cache, and update localStorage
   function refreshVersion(): void {
-    window.hermesAPI.refreshHermesVersion().then((v) => {
-      setHermesVersion(v);
-      if (v) {
-        try {
-          localStorage.setItem("hermes-version-cache", v);
-        } catch {
-          /* ignore */
-        }
-      }
-    });
+    const requestId = ++loadConfigRequestRef.current;
+    setHermesVersion(null);
+    window.hermesAPI
+      .getConnectionConfig()
+      .then((conn) => {
+        const cacheKey = versionCacheKey(conn, profile);
+        return window.hermesAPI.refreshHermesVersion().then((version) => ({
+          cacheKey,
+          version,
+        }));
+      })
+      .then(({ cacheKey, version }) => {
+        if (requestId !== loadConfigRequestRef.current) return;
+        setHermesVersion(version);
+        if (version) setCachedVersion(cacheKey, version);
+      });
   }
 
   async function handleUpdateHermes(): Promise<void> {
@@ -638,13 +876,13 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
             </button>
             <button
               className={`settings-theme-option ${connMode === "remote" ? "active" : ""}`}
-              onClick={() => setConnMode("remote")}
+              onClick={() => void handleSwitchToRemote()}
             >
               {t("settings.modeRemote")}
             </button>
             <button
               className={`settings-theme-option ${connMode === "ssh" ? "active" : ""}`}
-              onClick={() => setConnMode("ssh")}
+              onClick={() => void handleSwitchToSsh()}
             >
               {t("settings.modeSsh")}
             </button>
@@ -733,6 +971,39 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
                 {t("settings.remoteApiKeyHint")}
               </div>
             </div>
+            <div className="settings-field">
+              <label className="settings-field-label">Chat transport</label>
+              <div className="settings-theme-options">
+                {CHAT_TRANSPORT_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`settings-theme-option ${
+                      remoteChatTransport === option ? "active" : ""
+                    }`}
+                    onClick={() =>
+                      void handleChatTransportChange("remote", option)
+                    }
+                  >
+                    {option[0].toUpperCase() + option.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="settings-field-hint">
+                Auto tries the Hermes dashboard WebSocket first, then falls
+                back to the legacy remote API. Dashboard requires the remote
+                Hermes dashboard URL and a valid dashboard session token.
+              </div>
+              {transportProbe && (
+                <div
+                  className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
+                >
+                  <span>{transportProbe.label}</span>
+                  {transportProbe.loading && <span>Checking…</span>}
+                  {transportProbe.detail && <code>{transportProbe.detail}</code>}
+                </div>
+              )}
+            </div>
             <div className="settings-hermes-actions">
               <button
                 className="btn btn-secondary"
@@ -817,6 +1088,38 @@ function Settings({ profile }: { profile?: string }): React.JSX.Element {
               <div className="settings-field-hint">
                 {t("settings.sshHint", { cmd: `${sshUser || "user"}@${sshHost || "host"}` })}
               </div>
+            </div>
+            <div className="settings-field">
+              <label className="settings-field-label">Chat transport</label>
+              <div className="settings-theme-options">
+                {CHAT_TRANSPORT_OPTIONS.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className={`settings-theme-option ${
+                      sshChatTransport === option ? "active" : ""
+                    }`}
+                    onClick={() => void handleChatTransportChange("ssh", option)}
+                  >
+                    {option[0].toUpperCase() + option.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="settings-field-hint">
+                Auto tries the Hermes dashboard WebSocket through the SSH
+                tunnel first, then falls back to legacy SSH chat. Dashboard
+                forces the upstream dashboard path; Legacy keeps the older SSH
+                transport.
+              </div>
+              {transportProbe && (
+                <div
+                  className={`settings-transport-status settings-transport-status--${transportProbe.kind}`}
+                >
+                  <span>{transportProbe.label}</span>
+                  {transportProbe.loading && <span>Checking…</span>}
+                  {transportProbe.detail && <code>{transportProbe.detail}</code>}
+                </div>
+              )}
             </div>
             <div className="settings-hermes-actions">
               <button

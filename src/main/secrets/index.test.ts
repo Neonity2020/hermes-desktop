@@ -10,6 +10,7 @@ import { getSecret, getSecretsProvider, resolvedSecrets } from "./index";
 
 const mockedGetConfigValue = vi.mocked(getConfigValue);
 const mockedReadEnv = vi.mocked(readEnv);
+const ORIGINAL_DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
 
 describe("secrets resolution", () => {
   beforeEach(() => {
@@ -17,9 +18,15 @@ describe("secrets resolution", () => {
     mockedReadEnv.mockReset();
     mockedReadEnv.mockReturnValue({});
     delete process.env.SECRETS_TEST_KEY;
+    delete process.env.DEEPSEEK_API_KEY;
   });
   afterEach(() => {
     delete process.env.SECRETS_TEST_KEY;
+    if (ORIGINAL_DEEPSEEK_API_KEY === undefined) {
+      delete process.env.DEEPSEEK_API_KEY;
+    } else {
+      process.env.DEEPSEEK_API_KEY = ORIGINAL_DEEPSEEK_API_KEY;
+    }
   });
 
   it("defaults to the env provider when secrets.provider is unset", () => {

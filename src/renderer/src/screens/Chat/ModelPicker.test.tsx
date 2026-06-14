@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type Mock } from "vitest";
 
 vi.mock("../../components/useI18n", () => ({
   useI18n: () => ({
@@ -60,7 +60,7 @@ function renderPicker(
     onOpen?: () => void;
     onSelectModel?: (provider: string, model: string, baseUrl: string) => void;
   } = {},
-): { container: HTMLElement; onOpen: vi.fn; onSelectModel: vi.fn } {
+): { container: HTMLElement; onOpen: Mock; onSelectModel: Mock } {
   const onOpen = vi.fn();
   const onSelectModel = vi.fn();
   const utils = render(

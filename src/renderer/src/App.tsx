@@ -49,19 +49,18 @@ function App(): React.JSX.Element {
         setSplashStatus("Starting SSH tunnel…");
         try {
           await window.hermesAPI.startSshTunnel();
-          next = "main";
         } catch (tunnelErr) {
-          error = `SSH tunnel failed to start: ${(tunnelErr as Error).message}`;
-          next = "welcome";
+          console.warn("SSH tunnel failed to start on launch:", tunnelErr);
         }
+        next = "main";
       } else if (conn.mode === "remote" && conn.remoteUrl) {
         setSplashStatus("Testing remote connection…");
         const ok = await window.hermesAPI.testRemoteConnection(conn.remoteUrl);
         if (ok) {
           next = "main";
         } else {
-          error = `Cannot reach remote Hermes at ${conn.remoteUrl}. Check the URL or switch to local mode.`;
-          next = "welcome";
+          console.warn(`Cannot reach remote Hermes at ${conn.remoteUrl}.`);
+          next = "main";
         }
       } else {
         setSplashStatus("Checking local install…");

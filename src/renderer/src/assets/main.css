@@ -2861,6 +2861,17 @@ body {
   white-space: normal;
 }
 
+.chat-bubble-error {
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  background: var(--error-bg);
+}
+
+.chat-error-message {
+  color: var(--error);
+  font-weight: 500;
+  white-space: pre-wrap;
+}
+
 .chat-bubble-agent pre,
 .chat-bubble-agent code {
   /* Restore preserved whitespace inside code blocks and inline code. */
@@ -4968,6 +4979,38 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+.settings-transport-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-transport-status span:first-child {
+  font-weight: 700;
+}
+
+.settings-transport-status code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.settings-transport-status--ok span:first-child {
+  color: var(--success, #22c55e);
+}
+
+.settings-transport-status--warn span:first-child {
+  color: var(--warning, #f59e0b);
 }
 
 .settings-input-row {
