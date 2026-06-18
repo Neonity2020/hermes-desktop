@@ -44,17 +44,27 @@ function DiffView({ code }: { code: string }): React.JSX.Element {
   );
 }
 
+// Source-position ids of code blocks the user has expanded. Kept at module
+// scope so the choice survives the remounts react-markdown causes while a
+// message is still streaming (index-based keys shift as the AST grows, which
+// would otherwise reset a per-component useState back to collapsed).
+const expandedCodeBlocks = new Set<string>();
+
 // Code block with syntax highlighting and copy button (lazy-loaded highlighter)
 function CodeBlock({
   className,
   children,
+  blockId,
 }: {
   className?: string;
   children?: React.ReactNode;
+  blockId?: string;
 }): React.JSX.Element {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
-  const [isCollapsed, setIsCollapsed] = useState(true);
+  const [isCollapsed, setIsCollapsed] = useState(() =>
+    blockId ? !expandedCodeBlocks.has(blockId) : true,
+  );
   const [highlighterReady, setHighlighterReady] = useState(
     () => _highlighterMod !== null && _oneDark !== null,
   );
@@ -133,7 +143,16 @@ function CodeBlock({
         <button
           type="button"
           className="chat-code-expand-btn"
-          onClick={() => setIsCollapsed((prev) => !prev)}
+          onClick={() =>
+            setIsCollapsed((prev) => {
+              const next = !prev;
+              if (blockId) {
+                if (next) expandedCodeBlocks.delete(blockId);
+                else expandedCodeBlocks.add(blockId);
+              }
+              return next;
+            })
+          }
         >
           {isCollapsed ? t("common.showMore") || "Show more" : t("common.showLess") || "Show less"}
         </button>
@@ -191,7 +210,7 @@ const AgentMarkdown = memo(function AgentMarkdown({
             <DownloadChip token={token} />
           );
         },
-        code: ({ className, children, ...props }) => {
+        code: ({ className, children, node, ...props }) => {
           const isInline =
             !className &&
             typeof children === "string" &&
@@ -203,7 +222,19 @@ const AgentMarkdown = memo(function AgentMarkdown({
               </code>
             );
           }
-          return <CodeBlock className={className}>{children}</CodeBlock>;
+          // Source offset of the opening fence is stable as the block streams,
+          // so it survives react-markdown's streaming remounts (unlike index
+          // keys) and uniquely identifies this block within the message.
+          const start = node?.position?.start;
+          const blockId =
+            start != null
+              ? `${start.offset ?? start.line}:${className ?? ""}`
+              : undefined;
+          return (
+            <CodeBlock className={className} blockId={blockId}>
+              {children}
+            </CodeBlock>
+          );
         },
       }}
     >

@@ -10825,6 +10825,24 @@ body {
   position: relative;
 }
 
+/* Drag handle on the left edge to free-resize the panel width. */
+.web-preview-resize-handle {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 20;
+  background: transparent;
+  transition: background var(--transition);
+}
+
+.web-preview-resize-handle:hover,
+.web-preview-resize-handle-active {
+  background: color-mix(in srgb, var(--accent-text) 45%, transparent);
+}
+
 .web-preview-header {
   display: flex;
   align-items: center;

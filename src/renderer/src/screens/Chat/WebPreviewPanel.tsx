@@ -21,6 +21,13 @@ interface WebPreviewPanelProps {
   }) => void;
 }
 
+// Resizable panel bounds. Min keeps the toolbar usable; max leaves room for
+// the chat column. Width is persisted across sessions.
+const MIN_PANEL_WIDTH = 320;
+const WIDTH_STORAGE_KEY = "hermes:webPreviewWidth";
+const maxPanelWidth = (): number =>
+  Math.max(MIN_PANEL_WIDTH, window.innerWidth - 360);
+
 // Custom interface for Electron Webview element
 interface ElectronWebviewElement extends HTMLElement {
   src: string;
@@ -182,6 +189,43 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
   const [canGoForward, setCanGoForward] = useState(false);
   const [isInspecting, setIsInspecting] = useState(false);
   const [isDomReady, setIsDomReady] = useState(false);
+
+  // Draggable panel width (px). Persisted so it survives reopen/restart.
+  const [width, setWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(WIDTH_STORAGE_KEY));
+    return Number.isFinite(saved) && saved >= MIN_PANEL_WIDTH ? saved : 480;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.PointerEvent): void => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = width;
+    let nextWidth = startWidth;
+    setIsResizing(true);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    const onMove = (ev: PointerEvent): void => {
+      // Panel sits on the right edge, so dragging the handle left widens it.
+      const delta = startX - ev.clientX;
+      nextWidth = Math.min(
+        maxPanelWidth(),
+        Math.max(MIN_PANEL_WIDTH, startWidth + delta),
+      );
+      setWidth(nextWidth);
+    };
+    const onUp = (): void => {
+      setIsResizing(false);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      localStorage.setItem(WIDTH_STORAGE_KEY, String(Math.round(nextWidth)));
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
 
   const webviewRef = useRef<ElectronWebviewElement>(null);
   const isInspectingRef = useRef(isInspecting);
@@ -358,7 +402,14 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
   };
 
   return (
-    <div className="web-preview-panel">
+    <div className="web-preview-panel" style={{ width }}>
+      <div
+        className={`web-preview-resize-handle ${
+          isResizing ? "web-preview-resize-handle-active" : ""
+        }`}
+        onPointerDown={startResize}
+        title="Drag to resize"
+      />
       <div className="web-preview-header">
         <button
           type="button"
@@ -429,7 +480,10 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
         </div>
       </div>
 
-      <div className="web-preview-webview-container">
+      <div
+        className="web-preview-webview-container"
+        style={{ pointerEvents: isResizing ? "none" : "auto" }}
+      >
         <webview
           ref={webviewRef as React.RefObject<any>}
           src={currentUrl}
