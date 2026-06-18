@@ -120,7 +120,8 @@ function Chat({
   // Default false so the panel doesn't open automatically and interfere with scrolling
   const [worktreeVisible, setWorktreeVisible] = useState<boolean>(false);
   const [webPreviewVisible, setWebPreviewVisible] = useState<boolean>(false);
-  const [webPreviewUrl, setWebPreviewUrl] = useState<string>("https://google.com");
+  const [webPreviewUrl, setWebPreviewUrl] =
+    useState<string>("https://google.com");
   // Explicit session-scoped model override — set only when the user picks
   // from the chat-screen picker (persist:false). Undefined until then so the
   // TUI gateway bypass in sendMessageViaBestApi is not triggered for normal
@@ -654,7 +655,10 @@ function Chat({
         if (isVoid) {
           return `${indent}<${tagName}${attrs}>\n`;
         }
-        if (el.childNodes.length === 1 && el.firstChild?.nodeType === Node.TEXT_NODE) {
+        if (
+          el.childNodes.length === 1 &&
+          el.firstChild?.nodeType === Node.TEXT_NODE
+        ) {
           const text = el.firstChild.textContent?.trim();
           return text
             ? `${indent}<${tagName}${attrs}>${text}</${tagName}>\n`
@@ -690,7 +694,12 @@ function Chat({
   };
 
   const handleInspectElement = useCallback(
-    (payload: { tagName: string; id: string; className: string; outerHTML: string }) => {
+    (payload: {
+      tagName: string;
+      id: string;
+      className: string;
+      outerHTML: string;
+    }) => {
       const formattedHtml = prettyPrintHTML(payload.outerHTML);
       const formatted = `Here is the HTML for the \`<${payload.tagName}>\` component to debug:\n\`\`\`html\n${formattedHtml}\n\`\`\``;
       chatInputRef.current?.appendText(formatted);
@@ -806,16 +815,23 @@ function Chat({
                 type="button"
                 className={`btn-ghost chat-tool-btn ${webPreviewVisible ? "chat-tool-btn-active" : ""}`}
                 onClick={() => setWebPreviewVisible((v) => !v)}
-                title={webPreviewVisible ? "Hide web preview" : "Show web preview"}
+                title={
+                  webPreviewVisible ? "Hide web preview" : "Show web preview"
+                }
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
                   width: 28,
                   height: 28,
+                  padding: 0,
                   borderRadius: 6,
-                  color: webPreviewVisible ? "var(--accent-text)" : "var(--text-secondary)",
-                  background: webPreviewVisible ? "color-mix(in srgb, var(--accent-text) 10%, transparent)" : "transparent",
+                  color: webPreviewVisible
+                    ? "var(--accent-text)"
+                    : "var(--text-secondary)",
+                  background: webPreviewVisible
+                    ? "color-mix(in srgb, var(--accent-text) 10%, transparent)"
+                    : "transparent",
                 }}
               >
                 <Globe size={14} />

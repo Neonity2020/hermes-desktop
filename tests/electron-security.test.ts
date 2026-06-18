@@ -36,7 +36,14 @@ describe("Electron main process hardening", () => {
   it("keeps attached webviews constrained after initial attachment", () => {
     expect(mainSrc).toContain('app.on("web-contents-created"');
     expect(mainSrc).toContain('contents.getType() === "webview"');
-    expect(mainSrc).toContain("hardenAttachedWebContents(contents)");
+    expect(mainSrc).toContain("hardenAttachedWebContents(contents, isWebPreview)");
+  });
+
+  it("identifies the web preview webview by its dedicated session, not a spoofable attribute", () => {
+    // getLastWebPreferences is not a public Electron API and returns undefined;
+    // the preview must be recognized via its partition session instead.
+    expect(mainSrc).not.toContain("getLastWebPreferences");
+    expect(mainSrc).toContain('session.fromPartition("web-preview")');
   });
 
   it("routes shell.openExternal through the allowlist helper", () => {
@@ -181,12 +188,12 @@ describe("Electron webview policy", () => {
     const handlers = new Map<string, NavigationHandler>();
     const webContentsMock = {
       setWindowOpenHandler: vi.fn(),
-      getLastWebPreferences: vi.fn(() => ({})),
       on: vi.fn((event: string, handler: NavigationHandler) => {
         handlers.set(event, handler);
       }),
     };
 
+    // Default (non-preview) webview: only loopback HTTP is permitted.
     hardenAttachedWebContents(
       webContentsMock as unknown as Parameters<
         typeof hardenAttachedWebContents
@@ -210,9 +217,14 @@ describe("Electron webview policy", () => {
     const redirectedEvent = { preventDefault: vi.fn() };
     handlers.get("will-redirect")?.(redirectedEvent, "http://example.com:3000");
     expect(redirectedEvent.preventDefault).toHaveBeenCalled();
+
+    // A non-preview webview must still block remote HTTPS.
+    const httpsEvent = { preventDefault: vi.fn() };
+    handlers.get("will-navigate")?.(httpsEvent, "https://example.com/docs");
+    expect(httpsEvent.preventDefault).toHaveBeenCalled();
   });
 
-  it("allows post-attachment navigation to remote HTTPS URLs for the web preview webview", () => {
+  it("allows post-attachment navigation/redirects to remote HTTPS for the web preview webview", () => {
     type NavigationHandler = (
       event: { preventDefault: () => void },
       url: string,
@@ -220,22 +232,27 @@ describe("Electron webview policy", () => {
     const handlers = new Map<string, NavigationHandler>();
     const webContentsMock = {
       setWindowOpenHandler: vi.fn(),
-      getLastWebPreferences: vi.fn(() => ({
-        additionalFeatures: ["is-web-preview"],
-      })),
       on: vi.fn((event: string, handler: NavigationHandler) => {
         handlers.set(event, handler);
       }),
     };
 
+    // isWebPreview=true is supplied by the caller (index.ts decides this by
+    // comparing webContents.session against session.fromPartition).
     hardenAttachedWebContents(
       webContentsMock as unknown as Parameters<
         typeof hardenAttachedWebContents
       >[0],
+      true,
     );
 
-    const allowedEvent = { preventDefault: vi.fn() };
-    handlers.get("will-navigate")?.(allowedEvent, "https://example.com/docs");
-    expect(allowedEvent.preventDefault).not.toHaveBeenCalled();
+    const navEvent = { preventDefault: vi.fn() };
+    handlers.get("will-navigate")?.(navEvent, "https://example.com/docs");
+    expect(navEvent.preventDefault).not.toHaveBeenCalled();
+
+    // google.com -> www.google.com style redirects must also be allowed.
+    const redirectEvent = { preventDefault: vi.fn() };
+    handlers.get("will-redirect")?.(redirectEvent, "https://www.google.com/");
+    expect(redirectEvent.preventDefault).not.toHaveBeenCalled();
   });
 });

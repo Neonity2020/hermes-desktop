@@ -2,3 +2,4 @@ This directory defines the high-level concepts, business logic, and architecture
 
 - [[chat-commands]] — how typed slash commands are routed through the gateway's `slash.exec`/`command.dispatch` pipeline instead of being sent as prompt text.
 - [[model-context]] — the per-model context-window override that drives the context gauge and the agent's auto-compaction.
+- [[web-preview]] — the in-app split-screen webview and the `partition`-based gate that lets only it load remote HTTPS while staying sandboxed.

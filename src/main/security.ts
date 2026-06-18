@@ -97,15 +97,10 @@ export function hardenWebviewPreferences(
   webPreferences.allowRunningInsecureContent = false;
 }
 
-export function hardenAttachedWebContents(webContents: WebContents): void {
-  const prefs = (
-    webContents as unknown as {
-      getLastWebPreferences?: () => { additionalFeatures?: string[] };
-    }
-  ).getLastWebPreferences?.();
-  const isWebPreview =
-    prefs && prefs.additionalFeatures?.includes("is-web-preview");
-
+export function hardenAttachedWebContents(
+  webContents: WebContents,
+  isWebPreview = false,
+): void {
   webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   webContents.on("will-navigate", (event, url) => {
     if (!isAllowedWebviewUrl(url, isWebPreview)) {

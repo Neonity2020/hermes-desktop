@@ -434,8 +434,11 @@ export const WebPreviewPanel = memo(function WebPreviewPanel({
           ref={webviewRef as React.RefObject<any>}
           src={currentUrl}
           {...({
-            name: "web-preview-webview",
-            nodeintegration: false,
+            // `partition` is a real Electron <webview> attribute (unlike `name`),
+            // so it is forwarded into the `will-attach-webview` params. The main
+            // process uses it to identify this webview as the web preview and
+            // permit remote HTTPS. It also isolates the preview's session.
+            partition: "web-preview",
           } as Record<string, unknown>)}
           style={{ width: "100%", height: "100%" }}
         />

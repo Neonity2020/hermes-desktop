@@ -596,7 +596,7 @@ function createWindow(): void {
   mainWindow.webContents.on(
     "will-attach-webview",
     (event, webPreferences, params) => {
-      const isWebPreview = params.name === "web-preview-webview";
+      const isWebPreview = params.partition === "web-preview";
       if (!isAllowedWebviewUrl(params.src, isWebPreview)) {
         event.preventDefault();
         console.warn("[SECURITY] Blocked webview attachment for untrusted URL");
@@ -604,11 +604,6 @@ function createWindow(): void {
       }
 
       hardenWebviewPreferences(webPreferences);
-      if (isWebPreview) {
-        (webPreferences as Record<string, unknown>).additionalFeatures = [
-          "is-web-preview",
-        ];
-      }
     },
   );
 
@@ -2829,7 +2824,12 @@ app.whenReady().then(() => {
 
   app.on("web-contents-created", (_event, contents) => {
     if (contents.getType() === "webview") {
-      hardenAttachedWebContents(contents);
+      // The web preview webview is the only one allowed to load remote HTTPS.
+      // Identify it reliably by its session: a <webview partition="web-preview">
+      // shares the singleton in-memory session returned by fromPartition().
+      const isWebPreview =
+        contents.session === session.fromPartition("web-preview");
+      hardenAttachedWebContents(contents, isWebPreview);
     }
   });
 
