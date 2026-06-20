@@ -11,7 +11,9 @@ import {
 } from "../src/main/security";
 
 const ROOT = join(__dirname, "..");
-const mainSrc = readFileSync(join(ROOT, "src/main/index.ts"), "utf-8");
+// Main-process window/security wiring lives in the startup module after the
+// app/ refactor; index.ts only bootstraps it via startMainProcess().
+const mainSrc = readFileSync(join(ROOT, "src/main/app/start.ts"), "utf-8");
 const preloadSrc = readFileSync(join(ROOT, "src/preload/index.ts"), "utf-8");
 const installerSrc = readFileSync(join(ROOT, "src/main/installer.ts"), "utf-8");
 

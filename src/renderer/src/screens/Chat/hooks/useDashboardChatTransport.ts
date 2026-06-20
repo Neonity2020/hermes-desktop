@@ -915,7 +915,10 @@ export function useDashboardChatTransport({
           reasoningSegmentClosed: reasoningSegmentClosedRef.current,
         },
         event,
-        { activeTurn: activeTurnRef.current },
+        {
+          activeTurn: activeTurnRef.current,
+          renderAssistantDeltas: connectionMode === "local",
+        },
       );
       reasoningSegmentClosedRef.current = next.reasoningSegmentClosed;
       const nextMessages = failed

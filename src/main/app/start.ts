@@ -56,7 +56,17 @@ export function startMainProcess(): void {
     });
 
     app.on("web-contents-created", (_event, contents) => {
-      hardenAttachedWebContents(contents);
+      if (contents.getType() === "webview") {
+        // The web preview webview is the only one allowed to load remote HTTPS.
+        // Identify it reliably by its session: a <webview partition="web-preview">
+        // shares the singleton in-memory session returned by fromPartition().
+        // The partition session is the only dependable signal available in
+        // web-contents-created — without it, post-attach redirects/navigations
+        // (e.g. google.com -> www.google.com) are wrongly blocked.
+        const isWebPreview =
+          contents.session === session.fromPartition("web-preview");
+        hardenAttachedWebContents(contents, isWebPreview);
+      }
     });
 
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {

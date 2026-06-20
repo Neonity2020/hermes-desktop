@@ -318,6 +318,56 @@ describe("applyDashboardStreamEvent", () => {
     expect(agent).toMatchObject({ pending: false });
   });
 
+  it("replaces mismatched streamed deltas with the final completion text", () => {
+    let state: DashboardEventState = {
+      messages: [{ id: "u-1", role: "user", content: "korean" }],
+      reasoningSegmentClosed: false,
+    };
+    state = applyDashboardStreamEvent(
+      state,
+      { type: "message.delta", payload: { text: "맞,측으로 말했습니다. " } },
+      { now: 310 },
+    );
+    state = applyDashboardStreamEvent(
+      state,
+      {
+        type: "message.complete",
+        payload: { text: "맞아요. 추측으로 말했습니다." },
+      },
+      { now: 311 },
+    );
+
+    const agent = state.messages[1] as ChatMessage & { content: string };
+    expect(state.messages).toHaveLength(2);
+    expect(agent.content).toBe("맞아요. 추측으로 말했습니다.");
+    expect(agent).toMatchObject({ pending: false });
+  });
+
+  it("can suppress assistant deltas and render only final completion text", () => {
+    let state: DashboardEventState = {
+      messages: [{ id: "u-1", role: "user", content: "korean" }],
+      reasoningSegmentClosed: false,
+    };
+    state = applyDashboardStreamEvent(
+      state,
+      { type: "message.delta", payload: { text: "맞,측으로 말했습니다. " } },
+      { now: 320, renderAssistantDeltas: false },
+    );
+    state = applyDashboardStreamEvent(
+      state,
+      {
+        type: "message.complete",
+        payload: { text: "맞아요. 추측으로 말했습니다." },
+      },
+      { now: 321, renderAssistantDeltas: false },
+    );
+
+    const agent = state.messages[1] as ChatMessage & { content: string };
+    expect(state.messages).toHaveLength(2);
+    expect(agent.content).toBe("맞아요. 추측으로 말했습니다.");
+    expect(agent).toMatchObject({ pending: false });
+  });
+
   it("does not show late reasoning snapshots that duplicate streamed assistant text", () => {
     const messages = reduceEvents([
       { type: "message.delta", payload: { text: "Done with the image." } },

@@ -15,6 +15,7 @@ export interface DashboardEventState {
 interface ApplyDashboardEventOptions {
   activeTurn?: ActiveTurn | null;
   now?: number;
+  renderAssistantDeltas?: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -508,18 +509,11 @@ function completeAssistantWithFinalText(
     if (!isAssistantBubble(msg) || msg.error) continue;
     if (activeTurn && msg.turnId && msg.turnId !== activeTurn.turnId) continue;
 
-    const current = normalizeText(msg.content);
-    const final = normalizeText(finalText);
-    const content =
-      current && (final === current || final.startsWith(current))
-        ? finalText
-        : msg.content + finalText;
-
     return [
       ...messagesWithoutDuplicateReasoning.slice(0, i),
       {
         ...msg,
-        content,
+        content: finalText,
         pending: false,
         turnId: msg.turnId || activeTurn?.turnId,
       },
@@ -549,6 +543,12 @@ export function applyDashboardStreamEvent(
     case "message.start":
       return { ...state, reasoningSegmentClosed: false };
     case "message.delta":
+      if (options.renderAssistantDeltas === false) {
+        return {
+          ...state,
+          reasoningSegmentClosed: false,
+        };
+      }
       return {
         messages: appendAssistantDelta(
           state.messages,
