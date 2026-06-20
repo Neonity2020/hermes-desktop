@@ -1190,6 +1190,7 @@ function sendMessageViaApi(
   // local install degrades to the pre-fix (fingerprint) behaviour
   // rather than 403-looping.
   const hasAuth = "Authorization" in headers;
+  const resumingExistingSession = Boolean(_resumeSessionId);
   let sessionId =
     _resumeSessionId || (hasAuth ? `desk-${Date.now()}-${randomUUID()}` : "");
   if (sessionId) {
@@ -1201,7 +1202,9 @@ function sendMessageViaApi(
     announcedSessionId = id;
     cb.onSessionStarted?.(id);
   }
-  announceSessionId(sessionId);
+  if (resumingExistingSession) {
+    announceSessionId(sessionId);
+  }
 
   let hasContent = false;
   let finished = false; // guard against double callbacks
@@ -1286,6 +1289,7 @@ function sendMessageViaApi(
       try {
         const payload = JSON.parse(data) as Record<string, unknown>;
         const toolEvent = chatToolEventFromPayload(payload);
+        announceSessionId(sessionId);
         if (cb.onToolEvent) {
           cb.onToolEvent(toolEvent);
         }
@@ -1348,6 +1352,7 @@ function sendMessageViaApi(
       // diagnostic probe.
       const reasoningDelta = extractReasoningDelta(delta);
       if (reasoningDelta && cb.onReasoningChunk) {
+        announceSessionId(sessionId);
         cb.onReasoningChunk(reasoningDelta);
       }
 
@@ -1359,6 +1364,7 @@ function sendMessageViaApi(
           cb.onToolProgress(`${match[1]} ${match[2]}`);
         } else {
           hasContent = true;
+          announceSessionId(sessionId);
           cb.onChunk(delta.content);
         }
       }
@@ -1540,7 +1546,16 @@ function sendMessageViaRuns(
   const headers = getJsonApiHeaders(profile, bodyBuf);
   if (sessionId) {
     headers["X-Hermes-Session-Id"] = sessionId;
-    cb.onSessionStarted?.(sessionId);
+  }
+  const resumingExistingSession = Boolean(resumeSessionId);
+  let announcedSessionId = "";
+  function announceSessionId(id: string): void {
+    if (!id || announcedSessionId === id) return;
+    announcedSessionId = id;
+    cb.onSessionStarted?.(id);
+  }
+  if (resumingExistingSession) {
+    announceSessionId(sessionId);
   }
 
   let runId = "";
@@ -1589,6 +1604,7 @@ function sendMessageViaRuns(
       const delta = typeof raw.delta === "string" ? raw.delta : "";
       if (delta) {
         hasContent = true;
+        announceSessionId(sessionId);
         cb.onChunk(delta);
       }
       return;
@@ -1596,12 +1612,14 @@ function sendMessageViaRuns(
 
     const reasoning = runEventReasoningText(raw);
     if (reasoning && cb.onReasoningChunk) {
+      announceSessionId(sessionId);
       cb.onReasoningChunk(reasoning);
       return;
     }
 
     const toolEvent = chatToolEventFromRunEvent(raw);
     if (toolEvent) {
+      announceSessionId(sessionId);
       if (cb.onToolEvent) {
         cb.onToolEvent(toolEvent);
       } else if (cb.onToolProgress) {
@@ -1614,6 +1632,7 @@ function sendMessageViaRuns(
       const output = typeof raw.output === "string" ? raw.output : "";
       if (output && !hasContent) {
         hasContent = true;
+        announceSessionId(sessionId);
         cb.onChunk(output);
       }
       const usage = runCompletedUsage(raw);
