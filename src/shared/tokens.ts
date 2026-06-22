@@ -78,6 +78,26 @@ export function formatTokenBalanceFull(raw: string, decimals: number): string {
   return `0.${"0".repeat(firstNonZero)}${visible}`;
 }
 
+/** Scale a whole-token integer string down by `scaleDigits` powers of ten and
+ *  render it with up to two decimal places (rounded, trailing zeros trimmed).
+ *  Pure string/BigInt math so it stays exact for balances far larger than
+ *  `Number.MAX_SAFE_INTEGER` — e.g. millions of 18-decimal tokens.
+ *  `compactScale("10500", 3)` → "10.5" (10,500 → 10.5K). */
+function compactScale(integerPart: string, scaleDigits: number): string {
+  const whole = integerPart.slice(0, integerPart.length - scaleDigits) || "0";
+  const fraction = integerPart.slice(integerPart.length - scaleDigits);
+  // Round to two decimals using the first three scaled-away digits.
+  const firstThree = (fraction + "000").slice(0, 3);
+  let hundredths = Math.round(Number(firstThree) / 10); // 0..100
+  let wholeNum = BigInt(whole);
+  if (hundredths === 100) {
+    wholeNum += 1n;
+    hundredths = 0;
+  }
+  const fracStr = hundredths.toString().padStart(2, "0").replace(/0+$/, "");
+  return fracStr ? `${wholeNum.toString()}.${fracStr}` : wholeNum.toString();
+}
+
 /** Format a raw token balance into a compact string with K/M suffixes.
  *  - Zero → "0"
  *  - ≥ 1M → e.g. "1.5M"
@@ -87,22 +107,20 @@ export function formatTokenBalanceFull(raw: string, decimals: number): string {
 export function formatTokenBalance(raw: string, decimals: number): string {
   if (!raw || raw === "0") return "0";
 
-  // Convert raw to a floating-point number for K/M comparison.
-  const numeric = Number(raw) / Math.pow(10, decimals);
+  // Whole-token integer part as a string — never via float, so precision holds
+  // for arbitrarily large balances.
+  const padded = raw.padStart(decimals + 1, "0");
+  const integerPart =
+    padded.slice(0, padded.length - decimals).replace(/^0+/, "") || "0";
 
-  if (numeric >= 1_000_000) {
-    const millions = numeric / 1_000_000;
-    const rounded = Math.round(millions * 100) / 100;
-    // Remove unnecessary trailing zeros: 1.50 → 1.5
-    const str = rounded.toFixed(2).replace(/\.?0+$/, "");
-    return `${str}M`;
+  // > 6 digits ⇒ ≥ 1,000,000 whole tokens.
+  if (integerPart.length > 6) {
+    return `${compactScale(integerPart, 6)}M`;
   }
 
-  if (numeric >= 1_000) {
-    const thousands = numeric / 1_000;
-    const rounded = Math.round(thousands * 100) / 100;
-    const str = rounded.toFixed(2).replace(/\.?0+$/, "");
-    return `${str}K`;
+  // > 3 digits ⇒ ≥ 1,000 whole tokens.
+  if (integerPart.length > 3) {
+    return `${compactScale(integerPart, 3)}K`;
   }
 
   // Fall through to full formatting for small values.

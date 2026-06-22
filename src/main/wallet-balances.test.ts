@@ -108,6 +108,34 @@ describe("formatTokenBalanceFull", () => {
   });
 });
 
+describe("formatTokenBalance precision for huge balances", () => {
+  // These exceed Number.MAX_SAFE_INTEGER once scaled, so a float-based
+  // implementation would round the K/M figure incorrectly. The string/BigInt
+  // path must stay exact.
+  it("keeps M rounding exact for 1,234,567 tokens", () => {
+    // 1,234,567 tokens → 1.23M (truncated/rounded to 2 decimals)
+    const raw = (1_234_567n * 10n ** 18n).toString();
+    expect(formatTokenBalance(raw, 18)).toBe("1.23M");
+  });
+
+  it("rounds 1,999,999 tokens up to 2M", () => {
+    const raw = (1_999_999n * 10n ** 18n).toString();
+    expect(formatTokenBalance(raw, 18)).toBe("2M");
+  });
+
+  it("formats a balance far beyond Number.MAX_SAFE_INTEGER", () => {
+    // 987,654,321,000,000 tokens — 15-digit whole part.
+    const raw = (987_654_321_000_000n * 10n ** 18n).toString();
+    expect(formatTokenBalance(raw, 18)).toBe("987654321M");
+  });
+
+  it("preserves the exact whole-token count in the M figure", () => {
+    // 5,000,123 tokens → 5M (the .000123 fraction rounds away).
+    const raw = (5_000_123n * 10n ** 18n).toString();
+    expect(formatTokenBalance(raw, 18)).toBe("5M");
+  });
+});
+
 // Use vi.hoisted so the mock closures can reference the mock objects
 // even though vi.mock is hoisted above the describe block.
 const mockState = vi.hoisted(() => ({
@@ -134,9 +162,7 @@ describe("getTokenBalances", () => {
       "0x1234567890abcdef1234567890abcdef12345678",
     );
 
-    expect(result.address).toBe(
-      "0x1234567890abcdef1234567890abcdef12345678",
-    );
+    expect(result.address).toBe("0x1234567890abcdef1234567890abcdef12345678");
     expect(result.balances).toHaveLength(2);
     expect(result.balances[0].tokenId).toBe("eth");
     expect(result.balances[0].formatted).toBe("2");
@@ -163,5 +189,61 @@ describe("getTokenBalances", () => {
     // ETH should still succeed
     const eth = result.balances.find((b) => b.tokenId === "eth");
     expect(eth?.error).toBeUndefined();
+  });
+
+  it("marks a token as errored when its RPC call exceeds the timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      // HD balanceOf never settles, so only the timeout can resolve it.
+      mockState.hdBalanceOf.mockImplementationOnce(() => new Promise(() => {}));
+
+      const { getTokenBalances } = await import("./wallet-balances");
+      const pending = getTokenBalances(
+        "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        50,
+      );
+      await vi.advanceTimersByTimeAsync(60);
+      const result = await pending;
+
+      const hd = result.balances.find((b) => b.tokenId === "hd");
+      expect(hd?.error).toMatch(/timed out/i);
+      // The fast-resolving ETH read is unaffected by HD's timeout.
+      const eth = result.balances.find((b) => b.tokenId === "eth");
+      expect(eth?.error).toBeUndefined();
+      expect(eth?.formatted).toBe("2");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("withTimeout", () => {
+  it("resolves with the value when the promise settles in time", async () => {
+    const { withTimeout } = await import("./wallet-balances");
+    await expect(withTimeout(Promise.resolve(42), 1000, "fast")).resolves.toBe(
+      42,
+    );
+  });
+
+  it("propagates the original rejection when the promise fails in time", async () => {
+    const { withTimeout } = await import("./wallet-balances");
+    await expect(
+      withTimeout(Promise.reject(new Error("boom")), 1000, "fail"),
+    ).rejects.toThrow("boom");
+  });
+
+  it("rejects with a labelled timeout error past the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const { withTimeout } = await import("./wallet-balances");
+      const pending = withTimeout(new Promise(() => {}), 100, "slow-call");
+      const assertion = expect(pending).rejects.toThrow(
+        /slow-call timed out after 100ms/,
+      );
+      await vi.advanceTimersByTimeAsync(150);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

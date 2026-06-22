@@ -191,7 +191,10 @@ export default function ProfileWalletPane({
   async function handleDelete(): Promise<void> {
     if (!deleteTarget) return;
     setError("");
-    const result = await window.hermesAPI.deleteWallet(profile, deleteTarget.id);
+    const result = await window.hermesAPI.deleteWallet(
+      profile,
+      deleteTarget.id,
+    );
     if (!result.success) {
       setError(result.error || t("agents.walletDeleteFailed"));
       setDeleteTarget(null);
@@ -261,16 +264,12 @@ export default function ProfileWalletPane({
                             className="profile-wallet-balance"
                             title={b.formattedFull}
                           >
-                            {TOKEN_ICONS[b.tokenId] ? (
+                            {TOKEN_ICONS[b.tokenId] && (
                               <img
                                 className="profile-wallet-balance-icon"
                                 src={TOKEN_ICONS[b.tokenId]}
                                 alt={b.symbol}
                               />
-                            ) : (
-                              <span className="profile-wallet-balance-symbol">
-                                {b.symbol}
-                              </span>
                             )}
                             <span className="profile-wallet-balance-symbol">
                               {b.symbol}
@@ -503,10 +502,7 @@ export default function ProfileWalletPane({
                 >
                   {t("common.cancel")}
                 </button>
-                <button
-                  className="btn btn-danger"
-                  onClick={handleDelete}
-                >
+                <button className="btn btn-danger" onClick={handleDelete}>
                   <Trash size={14} />
                   {t("agents.walletDeleteConfirmLabel")}
                 </button>

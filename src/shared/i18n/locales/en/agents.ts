@@ -60,8 +60,6 @@ export default {
   walletEmpty: "No wallets yet",
   walletCopyAddress: "Copy address",
   walletCopied: "Copied",
-  walletDelete: "Remove",
-  walletDeleteConfirm: "Confirm",
   walletDeleteFailed: "Couldn't remove wallet",
   walletLoadFailed: "Couldn't load wallets",
   walletCreateFailed: "Couldn't add wallet",
@@ -73,7 +71,6 @@ export default {
   walletBalanceLoading: "Loading…",
   walletBalanceUnavailable: "Unavailable",
   walletBalanceRefresh: "Refresh",
-  walletBalanceFetchFailed: "Couldn't fetch balances",
   walletDeleteTitle: "Remove wallet",
   walletDeleteWarning:
     "This will permanently remove this wallet from Hermes. Make sure you have backed up the recovery phrase — you won't be able to recover the wallet without it.",

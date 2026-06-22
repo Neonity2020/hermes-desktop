@@ -119,4 +119,67 @@ describe("wallet store", () => {
     expect(result.success).toBe(false);
     expect(wallets.listWallets("default")).toHaveLength(0);
   });
+
+  it("rejects an invalid recovery phrase on import", async () => {
+    const wallets = await store();
+    const result = wallets.importWallet({
+      profile: "default",
+      name: "Bad",
+      recoveryPhrase: "not actually a valid bip39 mnemonic phrase here",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/valid recovery phrase/i);
+    expect(wallets.listWallets("default")).toHaveLength(0);
+  });
+
+  it("surfaces the secure-storage error on import, not a phrase error", async () => {
+    const wallets = await store();
+    // Mint a valid phrase while encryption is available...
+    const created = wallets.createWallet("default", "Source");
+    expect(created.success).toBe(true);
+
+    // ...then lose secure storage before importing it elsewhere.
+    mockState.encryptionAvailable = false;
+    const result = wallets.importWallet({
+      profile: "coder",
+      name: "Imported",
+      recoveryPhrase: created.recoveryPhrase || "",
+    });
+
+    expect(result.success).toBe(false);
+    // The phrase is valid — the failure is storage, and the message must say so
+    // rather than blaming the (perfectly good) recovery phrase.
+    expect(result.error).toMatch(/secure/i);
+    expect(result.error).not.toMatch(/valid recovery phrase/i);
+    expect(wallets.listWallets("coder")).toHaveLength(0);
+  });
+
+  it("renames a wallet and rejects unknown ids", async () => {
+    const wallets = await store();
+    const created = wallets.createWallet("default", "Old name");
+    const id = created.wallet?.id || "";
+
+    const renamed = wallets.renameWallet("default", id, "New name");
+    expect(renamed.success).toBe(true);
+    expect(wallets.listWallets("default")[0].name).toBe("New name");
+
+    const missing = wallets.renameWallet("default", "does-not-exist", "X");
+    expect(missing.success).toBe(false);
+    expect(missing.error).toMatch(/not found/i);
+  });
+
+  it("deletes a wallet and rejects unknown ids", async () => {
+    const wallets = await store();
+    const created = wallets.createWallet("default", "Primary");
+    const id = created.wallet?.id || "";
+
+    const missing = wallets.deleteWallet("default", "does-not-exist");
+    expect(missing.success).toBe(false);
+    expect(wallets.listWallets("default")).toHaveLength(1);
+
+    const removed = wallets.deleteWallet("default", id);
+    expect(removed.success).toBe(true);
+    expect(wallets.listWallets("default")).toHaveLength(0);
+  });
 });

@@ -148,10 +148,25 @@ export function createWallet(
 }
 
 export function importWallet(input: ImportWalletInput): WalletMutationResult {
+  let normalizedProfile: string | undefined;
   try {
-    const normalizedProfile = validateProfile(input.profile);
-    const recoveryPhrase = normalizeRecoveryPhrase(input.recoveryPhrase);
-    const wallet = Wallet.fromPhrase(recoveryPhrase);
+    normalizedProfile = validateProfile(input.profile);
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+
+  // Phrase validation is the only failure that should surface as "invalid
+  // phrase". Storage/encryption failures past this point are reported with
+  // their own message so the user isn't told a valid phrase is wrong.
+  const recoveryPhrase = normalizeRecoveryPhrase(input.recoveryPhrase);
+  let wallet: ReturnType<typeof Wallet.fromPhrase> | null = null;
+  try {
+    wallet = Wallet.fromPhrase(recoveryPhrase);
+  } catch {
+    return { success: false, error: "Enter a valid recovery phrase." };
+  }
+
+  try {
     const data = readWalletFile(normalizedProfile);
     if (!canAddWallet(data)) {
       return { success: false, error: GENERIC_CREATE_ERROR };
@@ -182,8 +197,11 @@ export function importWallet(input: ImportWalletInput): WalletMutationResult {
       wallet: publicWallet(stored),
       recoveryPhrase,
     };
-  } catch {
-    return { success: false, error: "Enter a valid recovery phrase." };
+  } catch (err) {
+    return {
+      success: false,
+      error: (err as Error).message || GENERIC_CREATE_ERROR,
+    };
   }
 }
 
