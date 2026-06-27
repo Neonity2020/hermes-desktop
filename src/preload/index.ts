@@ -768,9 +768,9 @@ const hermesAPI = {
 
   createProfile: (
     name: string,
-    clone: boolean,
+    cloneFrom: string | null,
   ): Promise<{ success: boolean; error?: string }> =>
-    ipcRenderer.invoke("create-profile", name, clone),
+    ipcRenderer.invoke("create-profile", name, cloneFrom),
 
   deleteProfile: (
     name: string,

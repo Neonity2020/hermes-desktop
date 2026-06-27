@@ -1,35 +1,200 @@
-import { app, shell, BrowserWindow, ipcMain, Menu, Notification, dialog, clipboard } from "electron";
+import {
+  app,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  Menu,
+  Notification,
+  dialog,
+  clipboard,
+} from "electron";
 import { extname } from "path";
 import { randomUUID } from "crypto";
 import { readdir, readFile, stat } from "fs/promises";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AppLocale } from "../../shared/i18n/types";
-import type { DesktopSessionContinuationItem, DesktopSessionLocalError } from "../../shared/session-continuation";
+import type {
+  DesktopSessionContinuationItem,
+  DesktopSessionLocalError,
+} from "../../shared/session-continuation";
 import { stageAttachment, clearStagedAttachments } from "../attachment-staging";
 import { persistPromptImageAttachments } from "../session-attachment-store";
-import { discoverProviderModels, getModelContextWindow } from "../model-discovery";
-import { persistSessionContinuation, persistSessionLocalError } from "../session-continuation-store";
-import { getSessionContextFolder, setSessionContextFolder, getRecentSessionContextFolders } from "../session-context-folder-store";
-import { getSessionModelOverride, setSessionModelOverride } from "../session-model-override-store";
-import { materializeDataUrlToTemp, readMediaAsDataUrl, saveMedia, mediaFileExists } from "../media";
+import {
+  discoverProviderModels,
+  getModelContextWindow,
+} from "../model-discovery";
+import {
+  persistSessionContinuation,
+  persistSessionLocalError,
+} from "../session-continuation-store";
+import {
+  getSessionContextFolder,
+  setSessionContextFolder,
+  getRecentSessionContextFolders,
+} from "../session-context-folder-store";
+import {
+  getSessionModelOverride,
+  setSessionModelOverride,
+} from "../session-model-override-store";
+import {
+  materializeDataUrlToTemp,
+  readMediaAsDataUrl,
+  saveMedia,
+  mediaFileExists,
+} from "../media";
 import { openTerminalInDirectory } from "../terminal-launcher";
-import { checkInstallStatus, verifyInstall, runInstall, inspectInstallTarget, validateHermesHome, setHermesHomeOverride, getHermesVersion, clearVersionCache, runHermesDoctor, runHermesUpdate, checkOpenClawExists, runClawMigrate, runHermesBackup, runHermesImport, runHermesDump, discoverMemoryProviders, readLogs, type InstallProgress } from "../installer";
-import { ensureLocalDashboardCompatibility, ensureSshDashboardCompatibility } from "../hermes-agent-compat";
-import { addMcpServer, installMcpCatalogEntry, listMcpCatalog, listMcpServers, removeMcpServer, setMcpServerEnabled, testMcpServer, type McpServerInput } from "../mcp-servers";
-import { runHermesAuthLogin, cancelHermesAuthLogin, detectDeviceCode } from "../hermes-auth";
-import { isRemoteMode, isRemoteOnlyMode, sendMessage, transcribeAudio, startGateway, startGatewayDetailed, stopGateway, isGatewayRunning, testRemoteConnection, restartGateway, notifyProfileSwitched, ensureSshTunnelIfNeeded, setSshRemoteApiKey, getRemoteAuthHeader, resolvePendingClarify } from "../hermes";
-import { getDashboardStatus, startDashboard, stopDashboard } from "../dashboard";
-import { startSshTunnel, ensureSshTunnel, getSshTunnelUrl, stopSshTunnel, testSshConnection, isSshTunnelActive, isSshTunnelHealthy } from "../ssh-tunnel";
-import { getClaw3dStatus, setupClaw3d, startDevServer, stopDevServer, startAdapter, stopAdapter, startAll as startClaw3dAll, stopAll as stopClaw3d, getClaw3dLogs, setClaw3dPort, getClaw3dPort, setClaw3dWsUrl, getClaw3dWsUrl, waitForClaw3dReady, type Claw3dSetupProgress } from "../claw3d";
+import {
+  checkInstallStatus,
+  verifyInstall,
+  runInstall,
+  inspectInstallTarget,
+  validateHermesHome,
+  setHermesHomeOverride,
+  getHermesVersion,
+  clearVersionCache,
+  runHermesDoctor,
+  runHermesUpdate,
+  checkOpenClawExists,
+  runClawMigrate,
+  runHermesBackup,
+  runHermesImport,
+  runHermesDump,
+  discoverMemoryProviders,
+  readLogs,
+  type InstallProgress,
+} from "../installer";
+import {
+  ensureLocalDashboardCompatibility,
+  ensureSshDashboardCompatibility,
+} from "../hermes-agent-compat";
+import {
+  addMcpServer,
+  installMcpCatalogEntry,
+  listMcpCatalog,
+  listMcpServers,
+  removeMcpServer,
+  setMcpServerEnabled,
+  testMcpServer,
+  type McpServerInput,
+} from "../mcp-servers";
+import {
+  runHermesAuthLogin,
+  cancelHermesAuthLogin,
+  detectDeviceCode,
+} from "../hermes-auth";
+import {
+  isRemoteMode,
+  isRemoteOnlyMode,
+  sendMessage,
+  transcribeAudio,
+  startGateway,
+  startGatewayDetailed,
+  stopGateway,
+  isGatewayRunning,
+  testRemoteConnection,
+  restartGateway,
+  notifyProfileSwitched,
+  ensureSshTunnelIfNeeded,
+  setSshRemoteApiKey,
+  getRemoteAuthHeader,
+  resolvePendingClarify,
+} from "../hermes";
+import {
+  getDashboardStatus,
+  startDashboard,
+  stopDashboard,
+} from "../dashboard";
+import {
+  startSshTunnel,
+  ensureSshTunnel,
+  getSshTunnelUrl,
+  stopSshTunnel,
+  testSshConnection,
+  isSshTunnelActive,
+  isSshTunnelHealthy,
+} from "../ssh-tunnel";
+import {
+  getClaw3dStatus,
+  setupClaw3d,
+  startDevServer,
+  stopDevServer,
+  startAdapter,
+  stopAdapter,
+  startAll as startClaw3dAll,
+  stopAll as stopClaw3d,
+  getClaw3dLogs,
+  setClaw3dPort,
+  getClaw3dPort,
+  setClaw3dWsUrl,
+  getClaw3dWsUrl,
+  waitForClaw3dReady,
+  type Claw3dSetupProgress,
+} from "../claw3d";
 import { startOfficeStack } from "../office-start";
-import { readEnv, setEnvValue, getConfigValue, setConfigValue, getHermesHome, getModelConfig, setModelConfig, getCredentialPool, setCredentialPool, addCredentialPoolEntry, getConnectionConfig, getPublicConnectionConfig, normalizeRemoteChatTransport, resolveConnectionApiKeyUpdate, setConnectionConfig, getPlatformEnabled, setPlatformEnabled, getApiServerKeyStatus, invalidateSecretsCache, type ConnectionConfig } from "../config";
-import { getAuxiliaryConfig, setAuxiliaryTask, resetAuxiliaryToAuto } from "../auxiliary-config";
-import { applySessionLocalOverlays, listSessions, getSessionMessages, searchSessions, deleteSession, deleteSessions } from "../sessions";
-import { syncSessionCache, listCachedSessions, updateSessionTitle } from "../session-cache";
-import { remoteDeleteSession, remoteDeleteSessions, remoteGetSessionMessages, remoteListCachedSessions, remoteListSessions, remoteReadMediaAsDataUrl, remoteSearchSessions, remoteUpdateSessionTitle, type RemoteSessionConfig } from "../remote-sessions";
-import { remoteGetHermesHome, remoteGetHermesVersion } from "../remote-metadata";
-import { remoteAddModel, remoteGetModelConfig, remoteListModels, remoteRemoveModel, remoteSetModelConfig, remoteUpdateModel } from "../remote-models";
+import {
+  readEnv,
+  setEnvValue,
+  getConfigValue,
+  setConfigValue,
+  getHermesHome,
+  getModelConfig,
+  setModelConfig,
+  getCredentialPool,
+  setCredentialPool,
+  addCredentialPoolEntry,
+  getConnectionConfig,
+  getPublicConnectionConfig,
+  normalizeRemoteChatTransport,
+  resolveConnectionApiKeyUpdate,
+  setConnectionConfig,
+  getPlatformEnabled,
+  setPlatformEnabled,
+  getApiServerKeyStatus,
+  invalidateSecretsCache,
+  type ConnectionConfig,
+} from "../config";
+import {
+  getAuxiliaryConfig,
+  setAuxiliaryTask,
+  resetAuxiliaryToAuto,
+} from "../auxiliary-config";
+import {
+  applySessionLocalOverlays,
+  listSessions,
+  getSessionMessages,
+  searchSessions,
+  deleteSession,
+  deleteSessions,
+} from "../sessions";
+import {
+  syncSessionCache,
+  listCachedSessions,
+  updateSessionTitle,
+} from "../session-cache";
+import {
+  remoteDeleteSession,
+  remoteDeleteSessions,
+  remoteGetSessionMessages,
+  remoteListCachedSessions,
+  remoteListSessions,
+  remoteReadMediaAsDataUrl,
+  remoteSearchSessions,
+  remoteUpdateSessionTitle,
+  type RemoteSessionConfig,
+} from "../remote-sessions";
+import {
+  remoteGetHermesHome,
+  remoteGetHermesVersion,
+} from "../remote-metadata";
+import {
+  remoteAddModel,
+  remoteGetModelConfig,
+  remoteListModels,
+  remoteRemoveModel,
+  remoteSetModelConfig,
+  remoteUpdateModel,
+} from "../remote-models";
 import {
   listModels,
   addModel,
@@ -38,22 +203,154 @@ import {
   type SavedModel,
 } from "../models";
 import { validateChatReadiness } from "../validation";
-import { runConfigHealthCheck, autoFixIssue, readConfigFixLog, type IssueCode } from "../config-health";
-import { listProfiles, createProfile, deleteProfile, setActiveProfile } from "../profiles";
-import { setProfileColor, setProfileAvatar, removeProfileAvatar } from "../profile-meta";
-import { createWallet, deleteWallet, importWallet, listWallets, renameWallet } from "../wallet-store";
+import {
+  runConfigHealthCheck,
+  autoFixIssue,
+  readConfigFixLog,
+  type IssueCode,
+} from "../config-health";
+import {
+  listProfiles,
+  createProfile,
+  deleteProfile,
+  setActiveProfile,
+} from "../profiles";
+import {
+  setProfileColor,
+  setProfileAvatar,
+  removeProfileAvatar,
+} from "../profile-meta";
+import {
+  createWallet,
+  deleteWallet,
+  importWallet,
+  listWallets,
+  renameWallet,
+} from "../wallet-store";
 import { getTokenBalances } from "../wallet-balances";
 import type { ImportWalletInput } from "../../shared/wallets";
-import { readMemory, addMemoryEntry, updateMemoryEntry, removeMemoryEntry, writeUserProfile } from "../memory";
+import {
+  readMemory,
+  addMemoryEntry,
+  updateMemoryEntry,
+  removeMemoryEntry,
+  writeUserProfile,
+} from "../memory";
 import { readSoul, writeSoul, resetSoul } from "../soul";
-import { getPlatformToolsets, getToolsets, setMessagingPlatformToolsetEnabled, setToolsetEnabled } from "../tools";
-import { fetchRegistry, fetchModelRegistry, fetchRegistryDetail, listInstalledRegistry, installRegistryItem, type RegistryKind, type RegistryItem } from "../registry";
-import { listInstalledSkills, listBundledSkills, getSkillContent, installSkill, uninstallSkill } from "../skills";
-import { listCronJobs, createCronJob, removeCronJob, pauseCronJob, resumeCronJob, triggerCronJob } from "../cronjobs";
-import { applyMessagingPlatformUpdate, buildDesktopMessagingPlatforms, fetchRemoteMessagingPlatforms, readLocalGatewayPlatformStates, testDesktopMessagingPlatform, testRemoteMessagingPlatform, updateRemoteMessagingPlatform } from "../messaging-platforms";
-import { listBoards as kanbanListBoards, currentBoard as kanbanCurrentBoard, switchBoard as kanbanSwitchBoard, createBoard as kanbanCreateBoard, removeBoard as kanbanRemoveBoard, listTasks as kanbanListTasks, getTask as kanbanGetTask, createTask as kanbanCreateTask, assignTask as kanbanAssignTask, completeTask as kanbanCompleteTask, blockTask as kanbanBlockTask, unblockTask as kanbanUnblockTask, archiveTask as kanbanArchiveTask, promoteTask as kanbanPromoteTask, scheduleTask as kanbanScheduleTask, specifyTask as kanbanSpecifyTask, reclaimTask as kanbanReclaimTask, commentTask as kanbanCommentTask, dispatchOnce as kanbanDispatchOnce, listClaw3dHqTasks as kanbanListClaw3dHqTasks, type CreateTaskInput } from "../kanban";
+import {
+  getPlatformToolsets,
+  getToolsets,
+  setMessagingPlatformToolsetEnabled,
+  setToolsetEnabled,
+} from "../tools";
+import {
+  fetchRegistry,
+  fetchModelRegistry,
+  fetchRegistryDetail,
+  listInstalledRegistry,
+  installRegistryItem,
+  type RegistryKind,
+  type RegistryItem,
+} from "../registry";
+import {
+  listInstalledSkills,
+  listBundledSkills,
+  getSkillContent,
+  installSkill,
+  uninstallSkill,
+} from "../skills";
+import {
+  listCronJobs,
+  createCronJob,
+  removeCronJob,
+  pauseCronJob,
+  resumeCronJob,
+  triggerCronJob,
+} from "../cronjobs";
+import {
+  applyMessagingPlatformUpdate,
+  buildDesktopMessagingPlatforms,
+  fetchRemoteMessagingPlatforms,
+  readLocalGatewayPlatformStates,
+  testDesktopMessagingPlatform,
+  testRemoteMessagingPlatform,
+  updateRemoteMessagingPlatform,
+} from "../messaging-platforms";
+import {
+  listBoards as kanbanListBoards,
+  currentBoard as kanbanCurrentBoard,
+  switchBoard as kanbanSwitchBoard,
+  createBoard as kanbanCreateBoard,
+  removeBoard as kanbanRemoveBoard,
+  listTasks as kanbanListTasks,
+  getTask as kanbanGetTask,
+  createTask as kanbanCreateTask,
+  assignTask as kanbanAssignTask,
+  completeTask as kanbanCompleteTask,
+  blockTask as kanbanBlockTask,
+  unblockTask as kanbanUnblockTask,
+  archiveTask as kanbanArchiveTask,
+  promoteTask as kanbanPromoteTask,
+  scheduleTask as kanbanScheduleTask,
+  specifyTask as kanbanSpecifyTask,
+  reclaimTask as kanbanReclaimTask,
+  commentTask as kanbanCommentTask,
+  dispatchOnce as kanbanDispatchOnce,
+  listClaw3dHqTasks as kanbanListClaw3dHqTasks,
+  type CreateTaskInput,
+} from "../kanban";
 import { getAppLocale, setAppLocale } from "../locale";
-import { sshListInstalledSkills, sshGetSkillContent, sshInstallSkill, sshUninstallSkill, sshListBundledSkills, sshReadMemory, sshAddMemoryEntry, sshUpdateMemoryEntry, sshRemoveMemoryEntry, sshWriteUserProfile, sshReadSoul, sshWriteSoul, sshResetSoul, sshGetToolsets, sshGetPlatformToolsets, sshSetToolsetEnabled, sshSetMessagingPlatformToolsetEnabled, sshReadEnv, sshSetEnvValue, sshGetConfigValue, sshSetConfigValue, sshGetHermesHome, sshGetModelConfig, sshSetModelConfig, sshListSessions, sshGetSessionMessages, sshSearchSessions, sshListProfiles, sshCreateProfile, sshDeleteProfile, sshGatewayStatus, sshStartGateway, sshStopGateway, sshReadRemoteApiKey, sshResolveApiServerPort, sshReadDirectory, sshGetHermesVersion, sshReadLogs, sshGetPlatformEnabled, sshSetPlatformEnabled, sshListCachedSessions, sshRunDoctor, sshListModels, sshAddModel, sshRemoveModel, sshUpdateModel, sshRunUpdate, sshRunDump, sshDiscoverMemoryProviders } from "../ssh-remote";
+import {
+  sshListInstalledSkills,
+  sshGetSkillContent,
+  sshInstallSkill,
+  sshUninstallSkill,
+  sshListBundledSkills,
+  sshReadMemory,
+  sshAddMemoryEntry,
+  sshUpdateMemoryEntry,
+  sshRemoveMemoryEntry,
+  sshWriteUserProfile,
+  sshReadSoul,
+  sshWriteSoul,
+  sshResetSoul,
+  sshGetToolsets,
+  sshGetPlatformToolsets,
+  sshSetToolsetEnabled,
+  sshSetMessagingPlatformToolsetEnabled,
+  sshReadEnv,
+  sshSetEnvValue,
+  sshGetConfigValue,
+  sshSetConfigValue,
+  sshGetHermesHome,
+  sshGetModelConfig,
+  sshSetModelConfig,
+  sshListSessions,
+  sshGetSessionMessages,
+  sshSearchSessions,
+  sshListProfiles,
+  sshCreateProfile,
+  sshDeleteProfile,
+  sshGatewayStatus,
+  sshStartGateway,
+  sshStopGateway,
+  sshReadRemoteApiKey,
+  sshResolveApiServerPort,
+  sshReadDirectory,
+  sshGetHermesVersion,
+  sshReadLogs,
+  sshGetPlatformEnabled,
+  sshSetPlatformEnabled,
+  sshListCachedSessions,
+  sshRunDoctor,
+  sshListModels,
+  sshAddModel,
+  sshRemoveModel,
+  sshUpdateModel,
+  sshRunUpdate,
+  sshRunDump,
+  sshDiscoverMemoryProviders,
+} from "../ssh-remote";
 
 export interface IpcContext {
   activeRuns: Map<string, () => void>;
@@ -67,49 +364,84 @@ const APP_NAME = process.env.HERMES_DESKTOP_APP_NAME?.trim() || "Hermes One";
 
 type RemoteSessionBridgeConfig = RemoteSessionConfig;
 
-async function getSshDashboardSessionConfig(conn: ConnectionConfig, profile?: string): Promise<RemoteSessionBridgeConfig> {
-  if (conn.mode !== "ssh" || !conn.ssh) throw new Error("SSH connection is not configured.");
-  if (!(await sshGatewayStatus(conn.ssh, profile))) await sshStartGateway(conn.ssh, profile);
+async function getSshDashboardSessionConfig(
+  conn: ConnectionConfig,
+  profile?: string,
+): Promise<RemoteSessionBridgeConfig> {
+  if (conn.mode !== "ssh" || !conn.ssh)
+    throw new Error("SSH connection is not configured.");
+  if (!(await sshGatewayStatus(conn.ssh, profile)))
+    await sshStartGateway(conn.ssh, profile);
   const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
   await ensureSshTunnel({ ...conn.ssh, remotePort });
   const remoteUrl = getSshTunnelUrl();
   const apiKey = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
   if (!remoteUrl) throw new Error("SSH tunnel is not active.");
-  if (!apiKey.trim()) throw new Error("SSH dashboard sessions need a configured dashboard token or API_SERVER_KEY on the remote Hermes host.");
+  if (!apiKey.trim())
+    throw new Error(
+      "SSH dashboard sessions need a configured dashboard token or API_SERVER_KEY on the remote Hermes host.",
+    );
   setSshRemoteApiKey(apiKey);
   return { remoteUrl, apiKey };
 }
 
-async function withSshDashboardSessions<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation?: () => Promise<T> | T, profile?: string): Promise<T> {
+async function withSshDashboardSessions<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>,
+  legacyOperation?: () => Promise<T> | T,
+  profile?: string,
+): Promise<T> {
   if (conn.sshChatTransport === "legacy") {
     if (legacyOperation) return legacyOperation();
     throw new Error("This SSH session operation requires dashboard transport.");
   }
   try {
-    return await dashboardOperation(await getSshDashboardSessionConfig(conn, profile));
+    return await dashboardOperation(
+      await getSshDashboardSessionConfig(conn, profile),
+    );
   } catch (err) {
-    if (conn.sshChatTransport === "auto" && legacyOperation) return legacyOperation();
+    if (conn.sshChatTransport === "auto" && legacyOperation)
+      return legacyOperation();
     throw err;
   }
 }
 
-async function withSshDashboardModelLibrary<T>(conn: ConnectionConfig, dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>, legacyOperation: () => Promise<T> | T, profile?: string): Promise<T> {
-  if (conn.mode !== "ssh" || !conn.ssh) throw new Error("SSH connection is not configured.");
+async function withSshDashboardModelLibrary<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: (config: RemoteSessionBridgeConfig) => Promise<T>,
+  legacyOperation: () => Promise<T> | T,
+  profile?: string,
+): Promise<T> {
+  if (conn.mode !== "ssh" || !conn.ssh)
+    throw new Error("SSH connection is not configured.");
   if (conn.sshChatTransport === "legacy") return legacyOperation();
   const compat = await ensureSshDashboardCompatibility(conn.ssh);
   if (!compat.ok) {
-    console.warn("[ssh-model-library] Dashboard model-library compatibility check failed", compat.error ? compat.detail + ": " + compat.error : compat.detail);
+    console.warn(
+      "[ssh-model-library] Dashboard model-library compatibility check failed",
+      compat.error ? compat.detail + ": " + compat.error : compat.detail,
+    );
   } else if (compat.applied) {
-    try { await sshStopGateway(conn.ssh); } catch (err) { console.warn("[ssh-model-library] Failed to stop patched gateway", err); }
+    try {
+      await sshStopGateway(conn.ssh);
+    } catch (err) {
+      console.warn("[ssh-model-library] Failed to stop patched gateway", err);
+    }
     stopSshTunnel();
     await sshStartGateway(conn.ssh, profile);
   }
   return dashboardOperation(await getSshDashboardSessionConfig(conn, profile));
 }
 
-async function withRemoteDashboard<T>(conn: ConnectionConfig, dashboardOperation: () => Promise<T>, legacyOperation: () => Promise<T> | T): Promise<T> {
+async function withRemoteDashboard<T>(
+  conn: ConnectionConfig,
+  dashboardOperation: () => Promise<T>,
+  legacyOperation: () => Promise<T> | T,
+): Promise<T> {
   if (conn.remoteChatTransport === "legacy") return legacyOperation();
-  try { return await dashboardOperation(); } catch (err) {
+  try {
+    return await dashboardOperation();
+  } catch (err) {
     if (conn.remoteChatTransport === "auto") return legacyOperation();
     throw err;
   }
@@ -124,19 +456,27 @@ async function getActiveDashboardMediaConfig(): Promise<RemoteSessionBridgeConfi
   }
   if (conn.mode === "ssh") {
     if (conn.sshChatTransport === "legacy") return null;
-    try { return await getSshDashboardSessionConfig(conn); } catch { return null; }
+    try {
+      return await getSshDashboardSessionConfig(conn);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
 
-async function readMediaForCurrentConnection(filePath: string): Promise<string | null> {
+async function readMediaForCurrentConnection(
+  filePath: string,
+): Promise<string | null> {
   const local = readMediaAsDataUrl(filePath);
   if (local) return local;
   const remote = await getActiveDashboardMediaConfig();
   return remote ? remoteReadMediaAsDataUrl(remote, filePath) : null;
 }
 
-async function mediaFileExistsForCurrentConnection(filePath: string): Promise<boolean> {
+async function mediaFileExistsForCurrentConnection(
+  filePath: string,
+): Promise<boolean> {
   if (mediaFileExists(filePath)) return true;
   const remote = await getActiveDashboardMediaConfig();
   if (!remote) return false;
@@ -1344,22 +1684,25 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   );
 
-  ipcMain.handle("list-recent-session-context-folders", (_event, limit?: number) => {
-    const lim = typeof limit === "number" && limit > 0 ? limit : 20;
-    const folders = getRecentSessionContextFolders(lim);
-    if (folders.length < lim) {
-      const cached = listCachedSessions(100);
-      const seen = new Set(folders);
-      for (const s of cached) {
-        if (s.contextFolder && !seen.has(s.contextFolder)) {
-          seen.add(s.contextFolder);
-          folders.push(s.contextFolder);
-          if (folders.length >= lim) break;
+  ipcMain.handle(
+    "list-recent-session-context-folders",
+    (_event, limit?: number) => {
+      const lim = typeof limit === "number" && limit > 0 ? limit : 20;
+      const folders = getRecentSessionContextFolders(lim);
+      if (folders.length < lim) {
+        const cached = listCachedSessions(100);
+        const seen = new Set(folders);
+        for (const s of cached) {
+          if (s.contextFolder && !seen.has(s.contextFolder)) {
+            seen.add(s.contextFolder);
+            folders.push(s.contextFolder);
+            if (folders.length >= lim) break;
+          }
         }
       }
-    }
-    return folders;
-  });
+      return folders;
+    },
+  );
 
   // Per-session model/provider selected from the in-chat picker. This is a
   // desktop-only routing binding and intentionally stores no API keys.
@@ -1402,12 +1745,15 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (conn.mode === "ssh" && conn.ssh) return sshListProfiles(conn.ssh);
     return listProfiles();
   });
-  ipcMain.handle("create-profile", (_event, name: string, clone: boolean) => {
-    const conn = getConnectionConfig();
-    if (conn.mode === "ssh" && conn.ssh)
-      return sshCreateProfile(conn.ssh, name, clone);
-    return createProfile(name, clone);
-  });
+  ipcMain.handle(
+    "create-profile",
+    (_event, name: string, cloneFrom: string | null) => {
+      const conn = getConnectionConfig();
+      if (conn.mode === "ssh" && conn.ssh)
+        return sshCreateProfile(conn.ssh, name, cloneFrom);
+      return createProfile(name, cloneFrom);
+    },
+  );
   ipcMain.handle("delete-profile", (_event, name: string) => {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh)

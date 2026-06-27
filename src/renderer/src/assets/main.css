@@ -7758,32 +7758,12 @@ body {
   margin-top: 2px;
 }
 
-/* Agent card footer with chat button */
-.agents-card-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
-
-.agents-create {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 16px;
-  margin-bottom: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 .agents-create-clone {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
+  font-weight: 400;
   color: var(--text-secondary);
   cursor: pointer;
 }
@@ -7797,95 +7777,78 @@ body {
   color: var(--error);
 }
 
-.agents-create-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.agents-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 12px;
-}
-
-.agents-card {
-  position: relative;
-  background: var(--bg-secondary);
-  border: 1.5px solid var(--border);
+/* Profiles list — a table-style layout with a shared column grid so the
+   header and every row align. The active row is marked by a left green bar. */
+.agents-table {
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: 16px;
-  cursor: pointer;
-  transition: all var(--transition);
-  text-align: left;
-  font-family: var(--font-sans);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  overflow: hidden;
+  background: var(--bg-secondary);
 }
 
-.agents-card:hover {
-  border-color: var(--border-bright);
+.agents-table-head,
+.agents-row {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1.8fr) minmax(140px, 1fr) minmax(150px, 1fr)
+    auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+}
+
+.agents-table-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.agents-row {
+  position: relative;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+
+.agents-row:last-child {
+  border-bottom: none;
+}
+
+.agents-row:hover {
   background: var(--bg-tertiary);
 }
 
-/* Active profile: green outline with a slow breathing glow (no badge). */
-.agents-card.active {
-  border-color: var(--success);
-  animation: agents-active-glow 2.8s ease-in-out infinite;
-}
-@keyframes agents-active-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
-    border-color: color-mix(in srgb, var(--success) 70%, transparent);
-  }
-  50% {
-    box-shadow: 0 0 10px 1px rgba(34, 197, 94, 0.35);
-    border-color: var(--success);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .agents-card.active {
-    animation: none;
-    box-shadow: 0 0 0 1px var(--success);
-  }
+/* Active profile: a green bar flush to the left edge plus a subtle wash. */
+.agents-row.active {
+  background: var(--success-bg);
 }
 
-.agents-card-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.agents-card-avatar {
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  flex-shrink: 0;
-}
-
-.agents-card.active .agents-card-avatar {
-  background: var(--accent);
-  color: #fff;
-}
-
-/* Edit button — always visible top-right, opens the profile modal. */
-.agents-card-edit {
+.agents-row.active::before {
+  content: "";
   position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--success);
+}
+
+.agents-cell-actions {
+  justify-self: end;
+}
+
+/* Edit button — opens the profile modal. */
+.agents-row-edit {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -7894,7 +7857,7 @@ body {
   cursor: pointer;
   transition: all var(--transition);
 }
-.agents-card-edit:hover {
+.agents-row-edit:hover {
   color: var(--text-primary);
   border-color: var(--border-bright);
   background: var(--bg-tertiary);
@@ -9103,103 +9066,146 @@ body {
   border-color: var(--error);
 }
 
-.agents-card-info {
-  flex: 1;
+/* Profile cell — avatar plus name and a "provider · skills" subline. */
+.agents-cell-profile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   min-width: 0;
 }
 
-.agents-card-name {
+.agents-row-info {
+  min-width: 0;
+}
+
+.agents-row-name {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-}
-
-.agents-card-provider {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.agents-card-active-badge {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--accent-text);
-  background: var(--accent-subtle);
-  padding: 2px 8px;
-  border-radius: 10px;
-  flex-shrink: 0;
-}
-
-.agents-card-model {
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agents-card-stats {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.agents-row-sub {
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.agents-card-dot {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--text-muted);
+.agents-cell-model {
+  min-width: 0;
 }
 
-.agents-card-gateway-on {
+/* Model shown as a monospace chip; empty state stays plain muted text. */
+.agents-model-chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.agents-model-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.agents-cell-status {
+  display: flex;
+  align-items: center;
+}
+
+/* Gateway status as a rounded pill: green when running, muted when off. */
+.agents-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.agents-status-pill.on {
+  background: var(--success-bg);
   color: var(--success);
 }
 
-.agents-card-delete {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: none;
-  border: none;
+.agents-status-pill.off {
+  background: var(--bg-elevated);
   color: var(--text-muted);
-  cursor: pointer;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  transition: all var(--transition);
-  opacity: 0;
 }
 
-.agents-card:hover .agents-card-delete {
-  opacity: 1;
+.agents-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
 }
 
-.agents-card-delete:hover {
-  color: var(--error);
-  background: var(--error-bg);
-}
-
-.agents-card-confirm-delete {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+.agents-cell-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-secondary);
+  gap: 8px;
 }
 
-.agents-card-avatar-icon {
+/* ── New-profile modal ── */
+.agents-create-modal {
+  z-index: 301;
+  height: fit-content;
+  width: min(460px, calc(100vw - 32px));
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
   overflow: hidden;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
 }
 
-.agents-card-avatar-icon img {
-  border-radius: 6px;
+.agents-create-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.agents-create-modal-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.agents-create-modal-body {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+
+.agents-create-field {
+  display: grid;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agents-create-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
 }
 
 /* ========================================================================

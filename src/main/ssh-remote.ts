@@ -1747,7 +1747,8 @@ export function selectSshProfiles(
   launcher: LauncherProfileResult,
   scannedProfiles: SshProfileInfo[],
 ): SshProfileInfo[] {
-  if (launcher.present && launcher.profiles.length > 0) return launcher.profiles;
+  if (launcher.present && launcher.profiles.length > 0)
+    return launcher.profiles;
   if (scannedProfiles.length > 0) return scannedProfiles;
   return launcher.profiles;
 }
@@ -1854,16 +1855,19 @@ print(json.dumps(profiles))
 export async function sshCreateProfile(
   config: SshConfig,
   name: string,
-  clone: boolean,
+  cloneFrom: string | null,
 ): Promise<boolean> {
   try {
     const safe = name.replace(/[^a-zA-Z0-9_-]/g, "");
     if (!safe) return false;
     const quoted = shellQuote(safe);
-    if (clone) {
+    if (cloneFrom) {
+      const safeSource = cloneFrom.replace(/[^a-zA-Z0-9_-]/g, "") || "default";
       await sshExec(
         config,
-        `hermes profiles create ${quoted} --clone-from default 2>&1 || mkdir -p ~/.hermes/profiles/${quoted}`,
+        `hermes profiles create ${quoted} --clone-from ${shellQuote(
+          safeSource,
+        )} 2>&1 || mkdir -p ~/.hermes/profiles/${quoted}`,
       );
     } else {
       await sshExec(

@@ -219,7 +219,7 @@ export async function listProfiles(): Promise<ProfileInfo[]> {
 
 export function createProfile(
   name: string,
-  clone: boolean,
+  cloneFrom: string | null,
 ): { success: boolean; error?: string } {
   if (name === "default") {
     return { success: false, error: "Cannot create the default profile" };
@@ -227,10 +227,21 @@ export function createProfile(
   if (!isValidNamedProfileName(name)) {
     return { success: false, error: PROFILE_NAME_ERROR };
   }
+  // `cloneFrom` may be "default" (not a "named" profile) or any valid named
+  // profile; reject anything else so it can't reach the CLI as an argument.
+  if (
+    cloneFrom &&
+    cloneFrom !== "default" &&
+    !isValidNamedProfileName(cloneFrom)
+  ) {
+    return { success: false, error: PROFILE_NAME_ERROR };
+  }
 
   try {
-    const args = clone
-      ? ["profile", "create", name, "--clone"]
+    // `--clone-from <source>` copies that profile's config/keys/skills and
+    // implies `--clone`; omitting it creates a fresh profile.
+    const args = cloneFrom
+      ? ["profile", "create", name, "--clone-from", cloneFrom]
       : ["profile", "create", name];
     execFileSync(HERMES_PYTHON, hermesCliArgs(args), {
       cwd: join(HERMES_HOME, "hermes-agent"),

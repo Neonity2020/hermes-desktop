@@ -487,7 +487,7 @@ async function installWorkflow(
  * the published agent.
  */
 async function installAgent(item: RegistryItem): Promise<InstallResult> {
-  const created = createProfile(item.id, true);
+  const created = createProfile(item.id, "default");
   if (!created.success) return created;
   if (item.path) {
     const m = await fetchManifest(item.path);

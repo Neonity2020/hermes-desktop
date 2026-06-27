@@ -101,8 +101,11 @@ describe("Agents profile creation", () => {
     });
     fireEvent.click(screen.getByText("agents.create"));
 
+    // The create modal stays open on failure (so the user can retry), and its
+    // clone-from <select> also lists profiles — so "test2" can appear both as
+    // an <option> and as the refreshed table row. Assert it shows up at all.
     await waitFor(() => {
-      expect(screen.getByText("test2")).toBeTruthy();
+      expect(screen.getAllByText("test2").length).toBeGreaterThan(0);
     });
     expect(screen.getByText(/already exists/)).toBeTruthy();
     expect(api.listProfiles).toHaveBeenCalledTimes(2);

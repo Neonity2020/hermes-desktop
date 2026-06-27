@@ -604,7 +604,7 @@ interface HermesAPI {
   >;
   createProfile: (
     name: string,
-    clone: boolean,
+    cloneFrom: string | null,
   ) => Promise<{ success: boolean; error?: string }>;
   deleteProfile: (
     name: string,
