@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Plus, ChatBubble, Pencil, X } from "../../assets/icons";
 import ProfileAvatar from "../../components/common/ProfileAvatar";
 import { AppModal, AppModalTitle } from "../../components/modal/AppModal";
@@ -49,9 +49,43 @@ function Agents({
     setLoading(false);
   }, []);
 
+  // A switched profile starts its gateway asynchronously, so the pid file the
+  // status reads from isn't written yet when the switch returns. Poll the list
+  // until that profile reports running (or we give up) so the row flips to
+  // "Running" on its own instead of only after a manual refresh/revisit.
+  const gatewayPollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const stopGatewayPoll = useCallback((): void => {
+    if (gatewayPollRef.current) {
+      clearTimeout(gatewayPollRef.current);
+      gatewayPollRef.current = null;
+    }
+  }, []);
+
+  const pollGatewayReady = useCallback(
+    (name: string): void => {
+      stopGatewayPoll();
+      // ~15 attempts × 700ms ≈ 10s, enough for a cold gateway to come up.
+      let attemptsLeft = 15;
+      const tick = async (): Promise<void> => {
+        const list = await window.hermesAPI.listProfiles();
+        setProfiles(list);
+        const target = list.find((p) => p.name === name);
+        attemptsLeft -= 1;
+        if (target?.gatewayRunning || attemptsLeft <= 0) return;
+        gatewayPollRef.current = setTimeout(tick, 700);
+      };
+      gatewayPollRef.current = setTimeout(tick, 700);
+    },
+    [stopGatewayPoll],
+  );
+
   useEffect(() => {
     loadProfiles();
   }, [loadProfiles]);
+
+  // Cancel any in-flight gateway poll when the page unmounts.
+  useEffect(() => stopGatewayPoll, [stopGatewayPoll]);
 
   // Open the create modal, defaulting the clone source to the active profile.
   function openCreate(): void {
@@ -90,6 +124,7 @@ function Agents({
     await window.hermesAPI.setActiveProfile(name);
     onSelectProfile(name);
     loadProfiles();
+    pollGatewayReady(name);
   }
 
   // "Chat" button — make the agent active (starts its gateway) then open a
