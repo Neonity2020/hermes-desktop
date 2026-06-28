@@ -2281,34 +2281,53 @@ export interface SshApiServerKeyResult {
 // the api_server refuses to start without API_SERVER_KEY, and the gateway only
 // loads the api_server platform when API_SERVER_ENABLED is truthy
 // (gateway/config.py). Ensures both, generating a key when missing/invalid.
+// In-flight dedup — same race class as the dashboard token: this is ensured on
+// every chat, so concurrent first-connect callers could each see "no key" and
+// append a different generated API_SERVER_KEY, leaving the gateway (dotenv
+// last-wins) on one value while a caller cached another → 401 over /v1.
+const apiServerKeyPromises = new Map<string, Promise<SshApiServerKeyResult>>();
+
 export async function sshEnsureApiServerKey(
   config: SshConfig,
   profile?: string,
 ): Promise<SshApiServerKeyResult> {
-  let existing = "";
-  let enabled = false;
-  try {
-    const env = await sshReadEnv(config, profile);
-    existing = (env["API_SERVER_KEY"] || "").trim();
-    enabled = ["true", "1", "yes"].includes(
-      (env["API_SERVER_ENABLED"] || "").trim().toLowerCase(),
-    );
-  } catch {
-    // remote .env missing/unreadable — provision from scratch below.
-  }
+  const cacheKey = `${config.host}:${config.port || 22}:${config.username}:${profile || "default"}`;
+  const inflight = apiServerKeyPromises.get(cacheKey);
+  if (inflight) return inflight;
 
-  let key = existing;
-  let created = false;
-  if (!isUsableApiServerKey(existing)) {
-    key = randomBytes(24).toString("hex"); // 48 hex chars, well over the minimum
-    await sshSetEnvValue(config, "API_SERVER_KEY", key, profile);
-    created = true;
+  const run = (async (): Promise<SshApiServerKeyResult> => {
+    let existing = "";
+    let enabled = false;
+    try {
+      const env = await sshReadEnv(config, profile);
+      existing = (env["API_SERVER_KEY"] || "").trim();
+      enabled = ["true", "1", "yes"].includes(
+        (env["API_SERVER_ENABLED"] || "").trim().toLowerCase(),
+      );
+    } catch {
+      // remote .env missing/unreadable — provision from scratch below.
+    }
+
+    let key = existing;
+    let created = false;
+    if (!isUsableApiServerKey(existing)) {
+      key = randomBytes(24).toString("hex"); // 48 hex chars, well over the minimum
+      await sshSetEnvValue(config, "API_SERVER_KEY", key, profile);
+      created = true;
+    }
+    if (!enabled) {
+      await sshSetEnvValue(config, "API_SERVER_ENABLED", "true", profile);
+      created = true; // gateway must (re)start to load the api_server platform
+    }
+    return { key, created };
+  })();
+
+  apiServerKeyPromises.set(cacheKey, run);
+  try {
+    return await run;
+  } finally {
+    apiServerKeyPromises.delete(cacheKey);
   }
-  if (!enabled) {
-    await sshSetEnvValue(config, "API_SERVER_ENABLED", "true", profile);
-    created = true; // gateway must (re)start to load the api_server platform
-  }
-  return { key, created };
 }
 
 // Poll the remote api_server's /health on the given loopback port until it
@@ -2371,25 +2390,53 @@ function remoteDashboardLogPath(profile?: string): string {
 // Read the dashboard session token from the remote .env (per profile),
 // generating + persisting one when absent so it stays stable across reconnects
 // and is shared by the remote dashboard process and the desktop client.
+// In-flight dedup so a connect storm (the dashboard is ensured on every chat /
+// model-library / session op) can't run several token provisions at once. The
+// previous raw `printf >> .env` had no guard, so concurrent callers each read
+// "no token" and appended a different one — observed as 9 divergent
+// HERMES_DASHBOARD_SESSION_TOKEN lines in one remote .env, where dotenv's
+// last-wins value drifted from whatever a caller cached.
+const dashboardTokenPromises = new Map<string, Promise<string>>();
+
 export async function sshEnsureDashboardToken(
   config: SshConfig,
   profile?: string,
 ): Promise<string> {
-  try {
-    const env = await sshReadEnv(config, profile);
-    const existing = (env["HERMES_DASHBOARD_SESSION_TOKEN"] || "").trim();
-    if (existing) return existing;
-  } catch {
-    // fall through to generate
-  }
-  const token = randomBytes(24).toString("hex");
   const envPath = remoteEnvPath(profile);
-  await sshExec(
-    config,
-    `mkdir -p "$(dirname ${envPath})" 2>/dev/null; ` +
-      `printf '\\nHERMES_DASHBOARD_SESSION_TOKEN=%s\\n' ${shellQuote(token)} >> ${envPath}`,
-  );
-  return token;
+  const cacheKey = `${config.host}:${config.port || 22}:${config.username}:${envPath}`;
+  const inflight = dashboardTokenPromises.get(cacheKey);
+  if (inflight) return inflight;
+
+  const run = (async (): Promise<string> => {
+    let token = "";
+    try {
+      const env = await sshReadEnv(config, profile);
+      token = (env["HERMES_DASHBOARD_SESSION_TOKEN"] || "").trim();
+    } catch {
+      // .env missing/unreadable — generate below.
+    }
+    if (!token) token = randomBytes(24).toString("hex");
+    // Write exactly ONE canonical line: strip any existing (possibly duplicated)
+    // entries, append one, then truncate-in-place via `cat > file` so the file's
+    // permissions/owner are preserved. Idempotent and self-heals prior dupes.
+    await sshExec(
+      config,
+      `mkdir -p "$(dirname ${envPath})" 2>/dev/null; ` +
+        `touch ${envPath}; ` +
+        `tmp=${envPath}.tmp.$$; ` +
+        `grep -v '^HERMES_DASHBOARD_SESSION_TOKEN=' ${envPath} > $tmp 2>/dev/null || true; ` +
+        `printf 'HERMES_DASHBOARD_SESSION_TOKEN=%s\\n' ${shellQuote(token)} >> $tmp; ` +
+        `cat $tmp > ${envPath}; rm -f $tmp`,
+    );
+    return token;
+  })();
+
+  dashboardTokenPromises.set(cacheKey, run);
+  try {
+    return await run;
+  } finally {
+    dashboardTokenPromises.delete(cacheKey);
+  }
 }
 
 // Resolve the remote dashboard port. Default profile uses 9119; named profiles
@@ -2562,28 +2609,64 @@ export interface SshDashboardTarget {
 
 let dashboardDistBuildPromise: Promise<boolean> | null = null;
 
-// Path to the built dashboard web dist marker on the remote.
-function remoteWebDistMarker(): string {
-  return "$HOME/.hermes/hermes-agent/hermes_cli/web_dist/index.html";
+// Candidate hermes-agent install roots, most specific first. A system-wide
+// install (the Linux package / install.sh default) lives at
+// /usr/local/lib/hermes-agent — NOT under $HOME — so a hardcoded
+// ~/.hermes/hermes-agent path wrongly concludes the dashboard web dist is
+// absent and forces every SSH connection into basic chat. Mirrors the resolver
+// philosophy of buildRemoteHermesCmd.
+const REMOTE_HERMES_ROOT_CANDIDATES = [
+  "/usr/local/lib/hermes-agent",
+  "$HOME/.hermes/hermes-agent",
+  "/opt/hermes/hermes-agent",
+  "$HOME/hermes-agent",
+];
+
+// Resolve the remote hermes-agent install root that has (or can build) the
+// dashboard web dist. Returns the first candidate whose built dist exists, else
+// the first that has the `web/` workspace (buildable), else null. One round
+// trip.
+export async function sshResolveDashboardRoot(
+  config: SshConfig,
+): Promise<string | null> {
+  const roots = REMOTE_HERMES_ROOT_CANDIDATES.join(" ");
+  // Prefer a root with the prebuilt dist; fall back to one with web sources.
+  const script =
+    `built=""; buildable=""; ` +
+    `for r in ${roots}; do ` +
+    `  if [ -z "$built" ] && [ -f "$r/hermes_cli/web_dist/index.html" ]; then built="$r"; fi; ` +
+    `  if [ -z "$buildable" ] && [ -f "$r/web/package.json" ]; then buildable="$r"; fi; ` +
+    `done; ` +
+    `if [ -n "$built" ]; then echo "$built"; elif [ -n "$buildable" ]; then echo "$buildable"; fi`;
+  try {
+    const out = (await sshExec(config, script, undefined, 10000)).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
 }
 
 // Ensure the dashboard web dist is built on the remote so `hermes dashboard
-// --skip-build` can serve it. The install vendors Node (~/.hermes/node) and the
-// web workspace deps, so a missing dist just needs the vite build (→
-// hermes_cli/web_dist). Returns true when the dist exists (already or after
-// building), false when it can't (no Node / build failed) — sshEnsureDashboard
-// then reports the dashboard unavailable and the desktop falls back to legacy.
+// --skip-build` can serve it. Resolves the real install root first (system-wide
+// or under $HOME), so an already-built dist is detected wherever hermes lives.
+// The install vendors Node (~/.hermes/node) and the web workspace deps, so a
+// missing dist just needs the vite build (→ hermes_cli/web_dist). Returns true
+// when the dist exists (already or after building), false when it can't (no
+// install with web sources / no Node / build failed) — sshEnsureDashboard then
+// reports the dashboard unavailable and the desktop falls back to legacy.
 // Concurrent callers share one in-flight build so a connect storm can't kick
 // off several `npm run build` at once.
 export async function sshEnsureDashboardDist(
   config: SshConfig,
 ): Promise<boolean> {
-  const marker = remoteWebDistMarker();
+  const root = await sshResolveDashboardRoot(config);
+  if (!root) return false;
+  const marker = `${root}/hermes_cli/web_dist/index.html`;
   const exists = async (): Promise<boolean> => {
     try {
       const out = await sshExec(
         config,
-        `[ -f ${marker} ] && echo yes || echo no`,
+        `[ -f "${marker}" ] && echo yes || echo no`,
         undefined,
         10000,
       );
@@ -2597,11 +2680,11 @@ export async function sshEnsureDashboardDist(
   dashboardDistBuildPromise = (async () => {
     try {
       // tsc -b && vite build. Prefer the vendored Node, fall back to system
-      // Node on PATH. Generous timeout: a first build on a small VPS can take
-      // a few minutes.
+      // Node/npm on PATH. Generous timeout: a first build on a small VPS can
+      // take a few minutes.
       await sshExec(
         config,
-        `cd $HOME/.hermes/hermes-agent && ` +
+        `cd "${root}" && ` +
           `PATH="$HOME/.hermes/node/bin:$PATH" npm run build -w web 2>&1`,
         undefined,
         300000,

@@ -307,6 +307,13 @@ function Providers({
   // so seeding LM Studio's localhost URL would light it up as selected (and the
   // autosave would persist it) before the user has actually picked a provider.
   function selectProvider(id: string): void {
+    // Picking a provider means the user is actively configuring — keep the
+    // editor open until they click Done. Without this, selecting a provider
+    // while the grid was open because nothing was configured yet (provider
+    // "auto") flips `isConfigured` true with `editingProvider` still false, so
+    // `showEditor` collapses the form mid-edit — e.g. clicking "Local / Others"
+    // closed it before the custom base URL / API key could be entered.
+    setEditingProvider(true);
     if (id === "custom" || id === "local") {
       // The "local" card has no provider id of its own — it routes as custom.
       // Leave base_url untouched: empty stays empty (nothing preselected) while
