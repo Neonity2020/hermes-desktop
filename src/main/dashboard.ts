@@ -15,18 +15,10 @@ import {
   HERMES_REPO,
 } from "./installer";
 import { buildLocalDashboardCliArgs } from "./dashboard-launch";
-import {
-  ensureLocalDashboardCompatibility,
-  ensureSshDashboardCompatibility,
-} from "./hermes-agent-compat";
+import { ensureLocalDashboardCompatibility } from "./hermes-agent-compat";
 import { HIDDEN_SUBPROCESS_OPTIONS } from "./process-options";
 import { ensureSshTunnel, getSshTunnelUrl } from "./ssh-tunnel";
-import {
-  sshGatewayStatus,
-  sshReadRemoteApiKey,
-  sshResolveApiServerPort,
-  sshStartGateway,
-} from "./ssh-remote";
+import { sshEnsureDashboard } from "./ssh-remote";
 import {
   getActiveProfileNameSync,
   normalizeProfileName,
@@ -134,18 +126,20 @@ async function sshDashboardConnectionFromConfig(
 ): Promise<DashboardConnection | null> {
   if (config.mode !== "ssh" || !config.ssh) return null;
 
-  await ensureSshDashboardCompatibility(config.ssh);
+  // Start `hermes dashboard` on the remote and tunnel to it (full parity with
+  // local mode). The dashboard is a superset of the gateway api_server, so this
+  // one tunnel serves /v1, /health, the full /api/* set, and the chat WS. Its
+  // /api/* routes are gated by the dashboard session token, which is the SSH
+  // credential here. Returns null when the remote can't run the dashboard
+  // (no Node / no web dist) — the caller then falls back to legacy.
+  const dash = await sshEnsureDashboard(config.ssh, profile);
+  if (!dash) return null;
 
-  if (!(await sshGatewayStatus(config.ssh, profile))) {
-    await sshStartGateway(config.ssh, profile);
-  }
-
-  const remotePort = await sshResolveApiServerPort(config.ssh, profile);
-  await ensureSshTunnel({ ...config.ssh, remotePort });
+  await ensureSshTunnel({ ...config.ssh, remotePort: dash.port });
   return sshDashboardConnectionFromTunnel(
     config,
     getSshTunnelUrl(),
-    config.apiKey.trim() || (await sshReadRemoteApiKey(config.ssh)),
+    dash.token,
     profile,
   );
 }

@@ -156,6 +156,11 @@ function Providers({
     // host-derives the API key.
     const configProvider =
       modelProvider in OPENAI_COMPATIBLE_BASE_URLS ? "custom" : modelProvider;
+    // Don't persist an incomplete custom selection. Opening "Local / Others"
+    // sets provider=custom before the user picks a preset/URL; saving custom
+    // with an empty base_url would clobber config.yaml with a dead endpoint.
+    // Wait until a base URL exists (a preset click or a typed URL).
+    if (configProvider === "custom" && !modelBaseUrl.trim()) return;
     await window.hermesAPI.setModelConfig(
       configProvider,
       modelName,
@@ -296,13 +301,17 @@ function Providers({
 
   // Select a provider from the card grid / preset chips / (legacy) dropdown.
   // Native ids clear base_url (the gateway hardcodes it); OpenAI-compatible ids
-  // autofill their endpoint and persist as `custom` (see saveModelConfig); the
-  // `local`/`custom` sentinel seeds a localhost placeholder.
+  // autofill their endpoint and persist as `custom` (see saveModelConfig). The
+  // `local`/`custom` sentinel only opens the preset group — it must NOT seed a
+  // base URL: the preset chips mark "active" by `modelBaseUrl === preset.baseUrl`,
+  // so seeding LM Studio's localhost URL would light it up as selected (and the
+  // autosave would persist it) before the user has actually picked a provider.
   function selectProvider(id: string): void {
     if (id === "custom" || id === "local") {
       // The "local" card has no provider id of its own — it routes as custom.
+      // Leave base_url untouched: empty stays empty (nothing preselected) while
+      // an already-chosen preset/custom URL is preserved when re-opening.
       setModelProvider("custom");
-      if (!modelBaseUrl) setModelBaseUrl("http://localhost:1234/v1");
     } else if (id in OPENAI_COMPATIBLE_BASE_URLS) {
       setModelProvider(id);
       setModelBaseUrl(OPENAI_COMPATIBLE_BASE_URLS[id]);

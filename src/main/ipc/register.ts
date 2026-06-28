@@ -11,6 +11,7 @@ import {
 import { extname } from "path";
 import { randomUUID } from "crypto";
 import { readdir, readFile, stat } from "fs/promises";
+import { getActiveProfileNameSync } from "../utils";
 import type { Attachment } from "../../shared/attachments";
 import type { SessionModelOverride } from "../../shared/model-override";
 import type { AppLocale } from "../../shared/i18n/types";
@@ -95,9 +96,7 @@ import {
   testRemoteConnection,
   restartGateway,
   notifyProfileSwitched,
-  ensureSshTunnelIfNeeded,
   setSshRemoteApiKey,
-  getRemoteAuthHeader,
   resolvePendingClarify,
 } from "../hermes";
 import {
@@ -112,7 +111,6 @@ import {
   stopSshTunnel,
   testSshConnection,
   isSshTunnelActive,
-  isSshTunnelHealthy,
 } from "../ssh-tunnel";
 import {
   getClaw3dStatus,
@@ -334,6 +332,7 @@ import {
   sshGatewayStatus,
   sshStartGateway,
   sshStopGateway,
+  sshEnsureDashboard,
   sshReadRemoteApiKey,
   sshResolveApiServerPort,
   sshReadDirectory,
@@ -370,19 +369,57 @@ async function getSshDashboardSessionConfig(
 ): Promise<RemoteSessionBridgeConfig> {
   if (conn.mode !== "ssh" || !conn.ssh)
     throw new Error("SSH connection is not configured.");
-  if (!(await sshGatewayStatus(conn.ssh, profile)))
+  // Start `hermes dashboard` on the remote and tunnel to it (full parity with
+  // local mode). The dashboard is a superset of the gateway api_server — it
+  // serves /v1 + /health + the full /api/* set + the chat WS — so this single
+  // tunnel covers every transport. Its /api/* routes are gated by the dashboard
+  // session token (the api_server key is rejected there), so that token is the
+  // SSH credential. Returns null when the remote can't run the dashboard (no
+  // Node / no web dist); we throw so callers fall back to legacy.
+  const dash = await sshEnsureDashboard(conn.ssh, profile);
+  if (!dash)
+    throw new Error(
+      "Hermes dashboard is unavailable on this SSH remote (needs Node + the dashboard web dist).",
+    );
+  await ensureSshTunnel({ ...conn.ssh, remotePort: dash.port });
+  const remoteUrl = getSshTunnelUrl();
+  if (!remoteUrl) throw new Error("SSH tunnel is not active.");
+  setSshRemoteApiKey(dash.token);
+  return { remoteUrl, apiKey: dash.token };
+}
+
+/**
+ * Establish the SSH tunnel to the correct endpoint and cache the matching
+ * credential — the remote dashboard (superset; dashboard-token auth) when
+ * available, else the gateway api_server (api_server-key auth). EVERY SSH
+ * tunnel entry point routes through this so they never target different ports
+ * on the single global tunnel and thrash it (each `startSshTunnel` first calls
+ * `stopSshTunnel`, so a 9119↔8642 flip-flop yields "SSH tunnel is not active").
+ */
+async function prepareSshTunnel(
+  conn: ConnectionConfig,
+  profile?: string,
+): Promise<void> {
+  if (conn.mode !== "ssh" || !conn.ssh) return;
+  const dash =
+    conn.sshChatTransport === "legacy"
+      ? null
+      : await sshEnsureDashboard(conn.ssh, profile);
+  if (dash) {
+    await ensureSshTunnel({ ...conn.ssh, remotePort: dash.port });
+    setSshRemoteApiKey(dash.token);
+    return;
+  }
+  // Gateway-only fallback: tunnel to the api_server and use the api_server key.
+  // Only (re)start the gateway when it is actually down — a cold tunnel must
+  // NOT trigger a `hermes gateway start` takeover that kills the running
+  // gateway we're about to tunnel to.
+  if (!(await sshGatewayStatus(conn.ssh, profile))) {
     await sshStartGateway(conn.ssh, profile);
+  }
   const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
   await ensureSshTunnel({ ...conn.ssh, remotePort });
-  const remoteUrl = getSshTunnelUrl();
-  const apiKey = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
-  if (!remoteUrl) throw new Error("SSH tunnel is not active.");
-  if (!apiKey.trim())
-    throw new Error(
-      "SSH dashboard sessions need a configured dashboard token or API_SERVER_KEY on the remote Hermes host.",
-    );
-  setSshRemoteApiKey(apiKey);
-  return { remoteUrl, apiKey };
+  setSshRemoteApiKey((await sshReadRemoteApiKey(conn.ssh)).trim());
 }
 
 async function withSshDashboardSessions<T>(
@@ -415,22 +452,28 @@ async function withSshDashboardModelLibrary<T>(
   if (conn.mode !== "ssh" || !conn.ssh)
     throw new Error("SSH connection is not configured.");
   if (conn.sshChatTransport === "legacy") return legacyOperation();
-  const compat = await ensureSshDashboardCompatibility(conn.ssh);
-  if (!compat.ok) {
-    console.warn(
-      "[ssh-model-library] Dashboard model-library compatibility check failed",
-      compat.error ? compat.detail + ": " + compat.error : compat.detail,
+  try {
+    // getSshDashboardSessionConfig starts the remote dashboard (which natively
+    // serves /api/model/*) and tunnels to it — no gateway web_server patch /
+    // restart dance needed.
+    return await dashboardOperation(
+      await getSshDashboardSessionConfig(conn, profile),
     );
-  } else if (compat.applied) {
-    try {
-      await sshStopGateway(conn.ssh);
-    } catch (err) {
-      console.warn("[ssh-model-library] Failed to stop patched gateway", err);
+  } catch (err) {
+    // Auto transport degrades to the legacy CLI/file path when the dashboard
+    // can't be reached — e.g. a gateway-only remote that can't run the
+    // dashboard (no Node / no web dist). A forced "dashboard" transport
+    // rethrows so the failure is visible.
+    if (conn.sshChatTransport === "auto") {
+      console.warn(
+        "[ssh-model-library] Dashboard unavailable; " +
+          "falling back to legacy SSH transport",
+        err,
+      );
+      return legacyOperation();
     }
-    stopSshTunnel();
-    await sshStartGateway(conn.ssh, profile);
+    throw err;
   }
-  return dashboardOperation(await getSshDashboardSessionConfig(conn, profile));
 }
 
 async function withRemoteDashboard<T>(
@@ -610,7 +653,9 @@ export function registerIpcHandlers(context: IpcContext): void {
         }
         await sshStartGateway(conn.ssh);
         await startSshTunnel(conn.ssh);
-        const key = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
+        // Authoritative SSH credential is the remote API_SERVER_KEY (see
+        // getSshDashboardSessionConfig); conn.apiKey is remote-mode-only.
+        const key = (await sshReadRemoteApiKey(conn.ssh)).trim();
         setSshRemoteApiKey(key);
         return { success: true };
       }
@@ -1085,15 +1130,11 @@ export function registerIpcHandlers(context: IpcContext): void {
   ipcMain.handle("start-ssh-tunnel", async () => {
     const conn = getConnectionConfig();
     if (conn.mode !== "ssh") return false;
-    if (conn.ssh && !(await sshGatewayStatus(conn.ssh))) {
-      await sshStartGateway(conn.ssh);
-    }
-    await ensureSshTunnel(conn.ssh);
-    // Cache the remote API key so chat auth works through the tunnel
-    if (conn.ssh) {
-      const key = conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
-      setSshRemoteApiKey(key);
-    }
+    // Route through the shared preparer so this targets the SAME endpoint
+    // (dashboard 9119, else gateway api_server) as every other SSH path — a
+    // bare ensureSshTunnel(conn.ssh) here would tunnel to the gateway port and
+    // fight the dashboard tunnel.
+    await prepareSshTunnel(conn);
     return true;
   });
 
@@ -1133,23 +1174,12 @@ export function registerIpcHandlers(context: IpcContext): void {
         startGateway(profile);
       }
 
-      await ensureSshTunnelIfNeeded();
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh) {
-        const gatewayRunning = await sshGatewayStatus(conn.ssh, profile);
-        const tunnelHealthy = await isSshTunnelHealthy();
-        const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
-        if (!gatewayRunning || !tunnelHealthy) {
-          await sshStartGateway(conn.ssh, profile);
-        }
-        await ensureSshTunnel({ ...conn.ssh, remotePort });
-        // Always ensure the API key is cached — the key may not have been
-        // read yet if the app-launch auto-start failed silently (#212).
-        if (!getRemoteAuthHeader().Authorization) {
-          const key =
-            conn.apiKey.trim() || (await sshReadRemoteApiKey(conn.ssh));
-          setSshRemoteApiKey(key);
-        }
+        // Tunnel to the dashboard (superset: /v1 + /api/* + chat WS) and cache
+        // its token, else the gateway api_server — via the shared preparer so
+        // all SSH paths agree on one tunnel target.
+        await prepareSshTunnel(conn, profile);
       }
 
       // Abort only a prior run under the SAME runId (a re-send in the same
@@ -2046,6 +2076,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         conn,
         (config) => remoteListModels(config),
         () => sshListModels(conn.ssh!),
+        getActiveProfileNameSync(),
       );
     }
     return listModels();
@@ -2076,6 +2107,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           conn,
           (config) => remoteAddModel(config, name, provider, model, baseUrl),
           () => sshAddModel(conn.ssh!, name, provider, model, baseUrl),
+          getActiveProfileNameSync(),
         );
       } else {
         addedModel = addModel(name, provider, model, baseUrl, contextLength);
@@ -2099,6 +2131,7 @@ export function registerIpcHandlers(context: IpcContext): void {
         conn,
         (config) => remoteRemoveModel(config, id),
         () => sshRemoveModel(conn.ssh!, id),
+        getActiveProfileNameSync(),
       );
     } else {
       removed = removeModel(id);
@@ -2130,6 +2163,7 @@ export function registerIpcHandlers(context: IpcContext): void {
           conn,
           (config) => remoteUpdateModel(config, id, fields),
           () => sshUpdateModel(conn.ssh!, id, fields),
+          getActiveProfileNameSync(),
         );
       } else {
         updated = updateModel(
