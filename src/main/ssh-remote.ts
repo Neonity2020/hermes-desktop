@@ -1972,13 +1972,20 @@ function remoteGatewayLogPath(profile?: string): string {
 }
 
 export function buildGatewayStartCommand(profile?: string): string {
+  // NB: `gateway run` (foreground, backgrounded here via nohup), NOT `gateway
+  // start`. `gateway start` drives the systemd/launchd *service* and fails with
+  // "Gateway service is not installed" on a bare VPS that never ran `hermes
+  // gateway install` — which is the common SSH remote. `gateway run` launches
+  // the gateway (and its api_server, when API_SERVER_ENABLED) directly and
+  // writes ~/.hermes/gateway.pid, matching the pid-based status/stop commands
+  // below. Hosts that DO have a systemd unit still go through systemctl.
   if (profile && profile !== "default") {
     return (
       `mkdir -p $HOME/.hermes/profiles/${profile}; ` +
       `(nohup ${buildRemoteHermesCmd(
-        ["--profile", profile, "gateway", "start"],
+        ["--profile", profile, "gateway", "run"],
         ` > ${remoteGatewayLogPath(profile)} 2>&1`,
-      )} &);`
+      )} &); sleep 0.3`
     );
   }
   return (
@@ -1986,13 +1993,13 @@ export function buildGatewayStartCommand(profile?: string): string {
     `sudo -n systemctl start hermes.service 2>/dev/null || ` +
     `systemctl start hermes.service 2>/dev/null || true; ` +
     `else ` +
-    // buildRemoteHermesCmd (not bare `hermes`) so the start works on remotes
+    // buildRemoteHermesCmd (not bare `hermes`) so the run works on remotes
     // where `hermes` is not on the non-interactive SSH PATH (only the venv /
     // launcher locations) — matching the named-profile branch above.
     `(nohup ${buildRemoteHermesCmd(
-      ["gateway", "start"],
+      ["gateway", "run"],
       " > $HOME/.hermes/gateway.log 2>&1",
-    )} &); ` +
+    )} &); sleep 0.3; ` +
     `fi`
   );
 }
@@ -2248,16 +2255,109 @@ export async function sshReadRemoteApiKey(config: SshConfig): Promise<string> {
   }
 }
 
+// The gateway api_server refuses to bind with a key shorter than 16 chars or an
+// obvious placeholder, so chat over /v1 can never connect with one. Mirrors the
+// remote-side guard.
+const MIN_API_SERVER_KEY_LENGTH = 16;
+const PLACEHOLDER_API_SERVER_KEY =
+  /^(?:changeme|placeholder|your[-_]?(?:api[-_]?)?key|api[-_]?server[-_]?key|secret|password|token)$/i;
+
+export function isUsableApiServerKey(key: string): boolean {
+  const k = (key || "").trim();
+  return k.length >= MIN_API_SERVER_KEY_LENGTH && !PLACEHOLDER_API_SERVER_KEY.test(k);
+}
+
+export interface SshApiServerKeyResult {
+  key: string;
+  /** True when the key and/or enable flag were just written — the caller must
+   *  (re)start the gateway so the api_server platform picks them up. */
+  created: boolean;
+}
+
+// Provision the remote gateway api_server for SSH chat over /v1 — the no-build
+// transport (no dashboard web dist, no Node) used by remote mode and
+// hermes-webui's gateway backend. SSH mode, unlike local mode (startGateway),
+// never WROTE these to the remote, so a fresh server had no /v1 endpoint at all:
+// the api_server refuses to start without API_SERVER_KEY, and the gateway only
+// loads the api_server platform when API_SERVER_ENABLED is truthy
+// (gateway/config.py). Ensures both, generating a key when missing/invalid.
+export async function sshEnsureApiServerKey(
+  config: SshConfig,
+  profile?: string,
+): Promise<SshApiServerKeyResult> {
+  let existing = "";
+  let enabled = false;
+  try {
+    const env = await sshReadEnv(config, profile);
+    existing = (env["API_SERVER_KEY"] || "").trim();
+    enabled = ["true", "1", "yes"].includes(
+      (env["API_SERVER_ENABLED"] || "").trim().toLowerCase(),
+    );
+  } catch {
+    // remote .env missing/unreadable — provision from scratch below.
+  }
+
+  let key = existing;
+  let created = false;
+  if (!isUsableApiServerKey(existing)) {
+    key = randomBytes(24).toString("hex"); // 48 hex chars, well over the minimum
+    await sshSetEnvValue(config, "API_SERVER_KEY", key, profile);
+    created = true;
+  }
+  if (!enabled) {
+    await sshSetEnvValue(config, "API_SERVER_ENABLED", "true", profile);
+    created = true; // gateway must (re)start to load the api_server platform
+  }
+  return { key, created };
+}
+
+// Poll the remote api_server's /health on the given loopback port until it
+// answers or the deadline passes. Runs on the remote via python3 (no curl
+// dependency). Lets a freshly (re)started gateway finish binding before we open
+// the tunnel, so the first chat doesn't race "tunnel health check failed".
+export async function sshWaitGatewayApiReady(
+  config: SshConfig,
+  port: number,
+  timeoutMs = 20000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  const script =
+    `import urllib.request as u\n` +
+    `try:\n` +
+    ` print(u.urlopen("http://127.0.0.1:${port}/health", timeout=3).status)\n` +
+    `except Exception:\n` +
+    ` print(0)`;
+  while (Date.now() <= deadline) {
+    try {
+      const out = await sshExec(
+        config,
+        `python3 -c ${shellQuote(script)}`,
+        undefined,
+        8000,
+      );
+      if (out.trim() === "200") return true;
+    } catch {
+      // transient — keep polling until the deadline
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  return false;
+}
+
 // ── Dashboard lifecycle ─────────────────────────────────────────────────────
 //
-// Full dashboard parity over SSH: rather than tunnelling only to the gateway's
-// api_server (which serves /v1 + /health + /api/sessions but NOT /api/model/* or
-// the dashboard chat WS), the desktop starts `hermes dashboard` on the remote
-// and tunnels to it. The dashboard is a superset — it serves /v1, /health, AND
-// the full /api/* set + /api/ws — so one tunnel covers both the dashboard and
-// legacy transports. Its /api/* routes are gated by HERMES_DASHBOARD_SESSION_TOKEN
-// (the api_server key is rejected there), so that token is the SSH credential
-// when connected through the dashboard.
+// Dashboard transport over SSH. The desktop starts `hermes dashboard` on the
+// remote and tunnels to it for the model library, session list, and the chat
+// WebSocket (/api/ws) — the surfaces the gateway api_server does NOT serve.
+//
+// IMPORTANT: the dashboard is NOT a /v1 superset. hermes_cli/web_server.py has
+// no /v1/chat|responses|runs routes and does not proxy /v1 to the gateway, so
+// chat over the dashboard tunnel uses /api/ws (token auth), never /v1. The /v1
+// chat transport lives ONLY on the gateway api_server (port 8642, API_SERVER_KEY
+// auth); see sshEnsureApiServerKey + prepareSshTunnel's gateway branch. The
+// dashboard also requires a built web dist (Node), which gateway-only installs
+// lack — those fall back to the gateway /v1 path. Its /api/* routes are gated by
+// HERMES_DASHBOARD_SESSION_TOKEN (the api_server key is rejected there).
 
 const REMOTE_DASHBOARD_DEFAULT_PORT = 9119;
 const REMOTE_DASHBOARD_PORT_ENV = "HERMES_DESKTOP_DASHBOARD_PORT";
@@ -2519,11 +2619,11 @@ export async function sshEnsureDashboardDist(
 }
 
 // Ensure the remote has a running dashboard for SSH transport. Starts the
-// gateway too (messaging/cron stays up; the dashboard may proxy /v1 to it),
+// gateway too (messaging/cron stays up, and chat keeps a working /v1 endpoint),
 // builds the web dist if missing, then starts the dashboard and waits for
 // readiness. Returns the port + token to tunnel to, or null when the remote
 // can't run the dashboard (no Node / no web dist) — callers then fall back to
-// the gateway-only legacy path.
+// the gateway-only /v1 path (see prepareSshTunnel).
 export async function sshEnsureDashboard(
   config: SshConfig,
   profile?: string,

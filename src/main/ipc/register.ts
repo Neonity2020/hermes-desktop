@@ -333,6 +333,8 @@ import {
   sshStartGateway,
   sshStopGateway,
   sshEnsureDashboard,
+  sshEnsureApiServerKey,
+  sshWaitGatewayApiReady,
   sshReadRemoteApiKey,
   sshResolveApiServerPort,
   sshReadDirectory,
@@ -410,16 +412,29 @@ async function prepareSshTunnel(
     setSshRemoteApiKey(dash.token);
     return;
   }
-  // Gateway-only fallback: tunnel to the api_server and use the api_server key.
-  // Only (re)start the gateway when it is actually down — a cold tunnel must
-  // NOT trigger a `hermes gateway start` takeover that kills the running
-  // gateway we're about to tunnel to.
-  if (!(await sshGatewayStatus(conn.ssh, profile))) {
-    await sshStartGateway(conn.ssh, profile);
-  }
+  // Gateway /v1 path — the no-build chat transport used when the remote has no
+  // dashboard web dist (gateway-only installs) or when transport is "legacy".
+  // SSH mode, unlike local mode, never provisioned the remote api_server, so a
+  // fresh server had no /v1 endpoint at all (no API_SERVER_KEY → api_server
+  // refuses to bind; API_SERVER_ENABLED unset → gateway never loads it). Ensure
+  // both, then tunnel to the api_server and use that key.
+  const { key, created } = await sshEnsureApiServerKey(conn.ssh, profile);
   const remotePort = await sshResolveApiServerPort(conn.ssh, profile);
+  const running = await sshGatewayStatus(conn.ssh, profile);
+  if (!running) {
+    // Down → start it. (A cold tunnel must not take over a healthy gateway,
+    // hence the status check; but a stopped gateway must be started.)
+    await sshStartGateway(conn.ssh, profile);
+    await sshWaitGatewayApiReady(conn.ssh, remotePort);
+  } else if (created) {
+    // Up, but predates the key/enable we just wrote, so its api_server isn't
+    // bound. Restart so it picks up the new env, then wait for /health.
+    await sshStopGateway(conn.ssh, profile);
+    await sshStartGateway(conn.ssh, profile);
+    await sshWaitGatewayApiReady(conn.ssh, remotePort);
+  }
   await ensureSshTunnel({ ...conn.ssh, remotePort });
-  setSshRemoteApiKey((await sshReadRemoteApiKey(conn.ssh)).trim());
+  setSshRemoteApiKey(key);
 }
 
 async function withSshDashboardSessions<T>(

@@ -3,6 +3,7 @@ import {
   buildGatewayStartCommand,
   buildGatewayStatusCommand,
   buildGatewayStopCommand,
+  isUsableApiServerKey,
   sshResolveDashboardPort,
 } from "./ssh-remote";
 import type { SshConfig } from "./ssh-tunnel";
@@ -28,6 +29,23 @@ describe("SSH remote profile gateway commands", () => {
     expect(command).not.toContain("--profile");
   });
 
+  it("launches the gateway with `run`, not the service-only `start`", () => {
+    // `gateway start` drives the systemd/launchd service and fails with
+    // "Gateway service is not installed" on a bare VPS; `gateway run` launches
+    // the gateway (and its api_server) directly. The systemd branch still uses
+    // `systemctl start`, but the CLI invocation must never be `gateway start`.
+    // CLI args are shell-quoted individually, so the invocation appears as the
+    // quoted token `'run'` (never the service-only `'start'`). The systemd
+    // branch's `systemctl start` is unquoted and unaffected.
+    const command = buildGatewayStartCommand();
+    expect(command).toContain("'run'");
+    expect(command).not.toContain("'start'");
+
+    const named = buildGatewayStartCommand("research");
+    expect(named).toContain("'run'");
+    expect(named).not.toContain("'start'");
+  });
+
   it("targets the named profile gateway pid and CLI flag", () => {
     const start = buildGatewayStartCommand("research");
     const status = buildGatewayStatusCommand("research");
@@ -38,6 +56,28 @@ describe("SSH remote profile gateway commands", () => {
     expect(start).toContain("research");
     expect(status).toContain("$HOME/.hermes/profiles/research/gateway.pid");
     expect(stop).toContain("$HOME/.hermes/profiles/research/gateway.pid");
+  });
+});
+
+describe("SSH api_server key provisioning", () => {
+  it("rejects empty, short, and placeholder keys so the api_server can bind", () => {
+    // The gateway api_server refuses to bind with a missing/short/placeholder
+    // key, so these must trigger provisioning of a fresh key.
+    expect(isUsableApiServerKey("")).toBe(false);
+    expect(isUsableApiServerKey("   ")).toBe(false);
+    expect(isUsableApiServerKey("short")).toBe(false);
+    expect(isUsableApiServerKey("0123456789abcde")).toBe(false); // 15 chars
+    expect(isUsableApiServerKey("changeme")).toBe(false);
+    expect(isUsableApiServerKey("API_SERVER_KEY")).toBe(false);
+    expect(isUsableApiServerKey("your-api-key")).toBe(false);
+  });
+
+  it("accepts a real key (>=16 chars, non-placeholder)", () => {
+    expect(isUsableApiServerKey("0123456789abcdef")).toBe(true); // 16 chars
+    expect(
+      isUsableApiServerKey("hermes-remote-test-key-0123456789abcdef"),
+    ).toBe(true);
+    expect(isUsableApiServerKey(`  ${"a".repeat(48)}  `)).toBe(true);
   });
 });
 
