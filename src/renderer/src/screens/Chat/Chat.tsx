@@ -901,10 +901,15 @@ function Chat({
   );
 
   // Context-gauge data: the latest turn's prompt tokens vs the model's window.
+  // Denominator priority: gateway-reported context_max (authoritative — knows
+  // the actual model config) > provider /models catalogue > static heuristic.
   const contextUsage: ContextUsage | null = usage?.contextTokens
     ? {
         used: usage.contextTokens,
-        window: realContextWindow ?? contextWindowForModel(chatCurrentModel),
+        window:
+          usage.contextWindowTokens ??
+          realContextWindow ??
+          contextWindowForModel(chatCurrentModel),
         cacheReadTokens: usage.cacheReadTokens,
         cacheWriteTokens: usage.cacheWriteTokens,
       }

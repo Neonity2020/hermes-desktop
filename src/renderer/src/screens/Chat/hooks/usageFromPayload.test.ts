@@ -24,6 +24,15 @@ describe("usageFromPayload", () => {
     expect(result?.totalTokens).toBe(12800);
     // Gauge must use the live context occupancy, not the cross-turn prompt sum.
     expect(result?.contextTokens).toBe(45000);
+    // Denominator comes from the gateway's authoritative context_max.
+    expect(result?.contextWindowTokens).toBe(200000);
+  });
+
+  it("omits contextWindowTokens when the gateway doesn't report context_max", () => {
+    const result = usageFromPayload({
+      usage: { input: 5000, output: 200, total: 5200 },
+    });
+    expect(result?.contextWindowTokens).toBeUndefined();
   });
 
   it("falls back to prompt tokens for context when compressor is inactive", () => {

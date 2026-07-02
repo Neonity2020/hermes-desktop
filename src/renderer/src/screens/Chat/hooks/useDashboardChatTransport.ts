@@ -650,6 +650,7 @@ export function usageFromPayload(payload: unknown): Partial<UsageState> | null {
   // wants — a live snapshot, not a cross-turn sum. Fall back to the latest
   // prompt count when the compressor hasn't reported yet.
   const contextUsed = Number(usage.context_used ?? 0);
+  const contextMax = Number(usage.context_max ?? 0);
   if (!promptTokens && !completionTokens && !totalTokens && !contextUsed) {
     return null;
   }
@@ -658,6 +659,7 @@ export function usageFromPayload(payload: unknown): Partial<UsageState> | null {
     completionTokens,
     totalTokens,
     contextTokens: contextUsed || promptTokens || undefined,
+    contextWindowTokens: contextMax || undefined,
   };
 }
 
@@ -999,6 +1001,8 @@ export function useDashboardChatTransport({
             totalTokens: (prev?.totalTokens || 0) + (usage.totalTokens || 0),
             cost: prev?.cost,
             contextTokens: usage.contextTokens || prev?.contextTokens,
+            contextWindowTokens:
+              usage.contextWindowTokens || prev?.contextWindowTokens,
             cacheReadTokens: prev?.cacheReadTokens,
             cacheWriteTokens: prev?.cacheWriteTokens,
           }));
