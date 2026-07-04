@@ -495,7 +495,7 @@ export const FONT_OPTIONS: FontOption[] = [
     value: "manrope",
     label: "settings.font.manrope",
     stack:
-      '"Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      '"Cairo", "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
   {
     value: "system",

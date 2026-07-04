@@ -372,3 +372,26 @@ jobs:
             artifacts/latest.yml
             artifacts/latest-linux.yml
             artifacts/latest-mac.yml
+
+  rebuild_landing_page:
+    name: Rebuild landing page
+    needs: [prepare, publish]
+    # Only after a real release that actually published a new tag.
+    if: needs.prepare.outputs.is_dry_run == 'false' && needs.prepare.outputs.tag_exists == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for release to propagate
+        # Give GitHub's releases/latest API time to settle before the landing
+        # page rebuilds and re-fetches the latest version.
+        run: sleep 300
+
+      - name: Trigger landing page deploy
+        # SITE_DEPLOY_TOKEN is a fine-grained PAT with "Actions: read and write"
+        # on fathah/hermes-landing-page. The default GITHUB_TOKEN cannot dispatch
+        # workflows in another repository.
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DEPLOY_TOKEN }}
+        run: |
+          gh workflow run deploy.yml \
+            --repo fathah/hermes-landing-page \
+            --ref main

@@ -455,6 +455,45 @@
   font-display: swap;
 }
 
+/* ----- Cairo ----- */
+@font-face {
+  font-family: "Cairo";
+  src: url("./fonts/Cairo-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  /* Scope Cairo to Arabic glyphs only; Latin etc. falls through to Manrope */
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "Cairo";
+  src: url("./fonts/Cairo-Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "Cairo";
+  src: url("./fonts/Cairo-SemiBold.ttf") format("truetype");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "Cairo";
+  src: url("./fonts/Cairo-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+
 /* ----- Shared Tokens ----- */
 :root {
   --radius-sm: 6px;
@@ -463,7 +502,7 @@
   --radius-xl: 20px;
   --transition: 150ms ease;
   --font-sans:
-    "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    "Cairo", "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono:
     "SF Mono", "Fira Code", "JetBrains Mono", Menlo, Consolas, monospace;
 }
@@ -5948,7 +5987,7 @@ body {
 .chat-ctxfolder-dropdown {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  inset-inline-start: 0;
   margin-bottom: 6px;
   width: 230px;
   max-height: 320px;
@@ -6086,7 +6125,7 @@ body {
 .chat-model-dropdown {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  inset-inline-start: 0;
   margin-bottom: 4px;
   width: 320px;
   max-height: 360px;
@@ -6137,7 +6176,7 @@ body {
 .chat-reasoning-dropdown {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  inset-inline-start: 0;
   margin-bottom: 4px;
   width: 280px;
   background: var(--bg-secondary);
@@ -6154,6 +6193,7 @@ body {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  text-align: start;
   padding: 6px 8px 4px;
 }
 
@@ -8222,6 +8262,18 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+  /* Chrome UI, not content: drag-selecting highlights nav labels and field
+     captions, which looks broken. Copyable content opts back in below. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.settings-modal input,
+.settings-modal textarea,
+.settings-modal pre,
+.settings-modal code {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .settings-modal-header {
