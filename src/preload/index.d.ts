@@ -357,6 +357,7 @@ interface HermesAPI {
       keyPath: string;
       remotePort: number;
       localPort: number;
+        dockerContainerName?: string;
     };
   }>;
   setConnectionConfig: (
@@ -384,6 +385,7 @@ interface HermesAPI {
         keyPath: string;
         remotePort: number;
         localPort: number;
+        dockerContainerName?: string;
       };
     }) => void,
   ) => () => void;
@@ -394,7 +396,24 @@ interface HermesAPI {
     keyPath: string,
     remotePort: number,
     localPort: number,
+    dockerContainerName?: string,
   ) => Promise<boolean>;
+  inspectSshHermesTarget: (
+    host: string,
+    port: number,
+    username: string,
+    keyPath: string,
+    remotePort: number,
+    dockerContainerName?: string,
+  ) => Promise<import("../shared/ssh-docker").SshHermesTargetInspection>;
+  provisionSshDockerTarget: (
+    host: string,
+    port: number,
+    username: string,
+    keyPath: string,
+    remotePort: number,
+    dockerContainerName: string,
+  ) => Promise<import("../shared/ssh-docker").SshDockerProvisionResult>;
   testRemoteConnection: (url: string, apiKey?: string) => Promise<boolean>;
   probeRemoteAuthMode: (
     url: string,
