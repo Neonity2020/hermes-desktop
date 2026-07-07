@@ -22,6 +22,10 @@ import type { HermesAccount } from "../../../../shared/account";
 // agent can't resolve their brand id). Map a loaded (provider, baseUrl) back to
 // the brand id so the summary/logo shows the brand instead of "Custom".
 function displayProviderFromConfig(provider: string, baseUrl: string): string {
+  // Legacy configs store `qwen` (the pre-#825 grid id); the agent aliases
+  // qwen → alibaba, so land those on the DashScope card instead of leaving
+  // an id no card or label knows about.
+  if (provider === "qwen") return "alibaba";
   if (provider !== "custom" || !baseUrl) return provider;
   const match = Object.entries(OPENAI_COMPATIBLE_BASE_URLS).find(
     ([, url]) => url === baseUrl,
@@ -563,9 +567,23 @@ function Providers({
         p.providerLabel,
       )) as LibModel;
     }
-    setModelProvider(displayProviderFromConfig(saved.provider, saved.baseUrl));
+    const nextProvider = displayProviderFromConfig(
+      saved.provider,
+      saved.baseUrl,
+    );
+    // DashScope (`alibaba`) is the one native provider with a user-chosen
+    // base_url (mainland vs international, picked at first-run Setup).
+    // Re-picking a model must not drop it to "" — the save-side canonical
+    // fill would silently flip a mainland user to the intl endpoint (#825).
+    const keepDashScopeUrl =
+      nextProvider === "alibaba" &&
+      modelProvider === "alibaba" &&
+      modelBaseUrl;
+    setModelProvider(nextProvider);
     setModelName(saved.model);
-    setModelBaseUrl(saved.baseUrl || p.baseUrl || "");
+    setModelBaseUrl(
+      saved.baseUrl || (keepDashScopeUrl ? modelBaseUrl : p.baseUrl || ""),
+    );
     setModelPickerOpen(false);
   }
 

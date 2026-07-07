@@ -195,6 +195,12 @@ import {
   remoteGetHermesVersion,
 } from "../remote-metadata";
 import {
+  remoteGetSkillContent,
+  remoteInstallSkill,
+  remoteListInstalledSkills,
+  remoteUninstallSkill,
+} from "../remote-skills";
+import {
   remoteAddModel,
   remoteGetModelConfig,
   remoteListModels,
@@ -2042,11 +2048,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   );
 
-  // Skills
+  // Skills. Remote (HTTP) mode routes to the dashboard's /api/skills* —
+  // falling through to the local CLI there showed (and mutated) the LOCAL
+  // machine's skills while connected to a remote (#578's report). Bundled
+  // skills stay local in remote mode: that list is the shipped catalog, not
+  // per-machine state.
   ipcMain.handle("list-installed-skills", (_event, profile?: string) => {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh)
       return sshListInstalledSkills(conn.ssh, profile);
+    if (conn.mode === "remote")
+      return remoteListInstalledSkills(activeSshProfile(profile));
     return listInstalledSkills(profile);
   });
   ipcMain.handle("list-bundled-skills", () => {
@@ -2058,6 +2070,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     const conn = getConnectionConfig();
     if (conn.mode === "ssh" && conn.ssh)
       return sshGetSkillContent(conn.ssh, skillPath);
+    if (conn.mode === "remote")
+      return remoteGetSkillContent(skillPath, activeSshProfile());
     return getSkillContent(skillPath);
   });
   ipcMain.handle(
@@ -2066,6 +2080,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshInstallSkill(conn.ssh, identifier);
+      if (conn.mode === "remote")
+        return remoteInstallSkill(identifier, activeSshProfile(_profile));
       return installSkill(identifier, _profile);
     },
   );
@@ -2075,6 +2091,8 @@ export function registerIpcHandlers(context: IpcContext): void {
       const conn = getConnectionConfig();
       if (conn.mode === "ssh" && conn.ssh)
         return sshUninstallSkill(conn.ssh, name);
+      if (conn.mode === "remote")
+        return remoteUninstallSkill(name, activeSshProfile(_profile));
       return uninstallSkill(name, _profile);
     },
   );
