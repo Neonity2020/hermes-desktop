@@ -9436,6 +9436,39 @@ body {
   flex: 0 0 auto;
 }
 
+/* Origin badge: cloud (backend-managed) vs local (this device). */
+.profile-wallet-badge {
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  flex: 0 0 auto;
+}
+
+.profile-wallet-badge-cloud {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.profile-wallet-badge-local {
+  background: var(--bg-tertiary, var(--accent-subtle));
+  color: var(--text-muted);
+}
+
+.profile-wallet-empty-note,
+.profile-wallet-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  max-width: 340px;
+}
+
+.profile-wallet-note {
+  margin-top: 10px;
+}
+
 .profile-wallet-address {
   display: block;
   margin-top: 6px;

@@ -8,6 +8,7 @@ import type {
   ImportWalletInput,
   ProfileWallet,
   WalletMutationResult,
+  WalletSyncResult,
 } from "../shared/wallets";
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type {
@@ -859,6 +860,10 @@ const hermesAPI = {
 
   listWallets: (profile?: string): Promise<ProfileWallet[]> =>
     ipcRenderer.invoke("list-wallets", profile),
+
+  // Cloud wallets from the backend for the profile's linked agent.
+  syncWallets: (profile?: string): Promise<WalletSyncResult> =>
+    ipcRenderer.invoke("wallet-sync", profile),
 
   createWallet: (
     profile?: string,

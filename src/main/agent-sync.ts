@@ -213,6 +213,14 @@ function writeSyncState(profile: string, state: SyncState): void {
   safeWriteFile(statePath(profile), JSON.stringify(state, null, 2));
 }
 
+/**
+ * The cloud agent id a profile is linked to (from its cloud-sync.json), or null
+ * if it has never synced. Used by wallet sync to fetch the agent's wallets.
+ */
+export function getLinkedAgentId(profile: string): string | null {
+  return readSyncState(profile)?.agentId ?? null;
+}
+
 function clearSyncState(profile: string): void {
   try {
     unlinkSync(statePath(profile));
