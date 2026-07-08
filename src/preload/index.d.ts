@@ -7,6 +7,7 @@ import type {
   ImportWalletInput,
   ProfileWallet,
   WalletMutationResult,
+  WalletSyncResult,
 } from "../shared/wallets";
 import type { TokenBalancesResponse } from "../shared/tokens";
 import type {
@@ -650,6 +651,7 @@ interface HermesAPI {
     name: string,
   ) => Promise<{ success: boolean; error?: string }>;
   listWallets: (profile?: string) => Promise<ProfileWallet[]>;
+  syncWallets: (profile?: string) => Promise<WalletSyncResult>;
   createWallet: (
     profile?: string,
     name?: string,

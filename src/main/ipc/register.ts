@@ -241,6 +241,7 @@ import {
   listWallets,
   renameWallet,
 } from "../wallet-store";
+import { syncWalletsForProfile } from "../wallet-sync";
 import { getTokenBalances } from "../wallet-balances";
 import type { ImportWalletInput } from "../../shared/wallets";
 import {
@@ -1977,6 +1978,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     "delete-wallet",
     (_event, profile: string | undefined, id: string) =>
       deleteWallet(profile, id),
+  );
+  // Cloud wallets provisioned by the backend for the profile's linked agent.
+  // Read-only here; the desktop no longer mints wallets locally.
+  ipcMain.handle("wallet-sync", (_event, profile?: string) =>
+    syncWalletsForProfile(profile),
   );
   ipcMain.handle("get-token-balances", (_event, address: string) =>
     getTokenBalances(address),

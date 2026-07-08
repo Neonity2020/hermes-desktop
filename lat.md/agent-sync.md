@@ -8,6 +8,8 @@ Phase 1 covers the free parts from the backend's `docs/agent-sync.md`: color, pe
 
 [[src/main/agent-sync.ts#syncAgents]] runs one single-flight pass: link local profiles to cloud agents, reconcile each part, create missing counterparts on both sides, and unlink mappings whose cloud agent disappeared.
 
+The stored link (a profile's cloud `agentId`) is also read by [[wallet-token-balances#Wallet Sync]] via [[src/main/agent-sync.ts#getLinkedAgentId]], so backend-provisioned wallets can be fetched for the same agent.
+
 Requests are bearer-authenticated with the device-login token — the account is located app-wide by [[src/main/account-store.ts#findAccountProfile]] (the token is saved under whichever profile was active at sign-in). Linking keys on the cloud agent's stable `id`; names only match never-synced profiles to their cloud namesakes and are never used to rename.
 
 Per part, the pure [[src/main/agent-sync.ts#decidePartAction]] compares the last-sync base hash with both sides' current hashes: only one side moved → that side wins; both moved (or first sync) → last-writer-wins by timestamp (local file mtime vs the agent's `updatedAt`). Equal content is always a no-op.

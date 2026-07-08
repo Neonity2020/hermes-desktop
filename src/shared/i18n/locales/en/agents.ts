@@ -95,4 +95,13 @@ export default {
   syncErrors: "Sync finished with {{count}} error(s)",
   syncUnauthorized: "Session expired — sign in again on the Providers page",
   syncFailed: "Sync failed",
+  walletSync: "Refresh",
+  walletSyncing: "Syncing…",
+  walletSourceLocal: "Local",
+  walletSourceCloud: "Cloud",
+  walletManagedEmpty: "No wallets yet",
+  walletSyncedHint:
+    "Wallets are managed in your Hermes One account and appear here once this agent syncs.",
+  walletSignInHint:
+    "Sign in to your Hermes One account on the Providers page to see this agent's wallets.",
 } as const;
