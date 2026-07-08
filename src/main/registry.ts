@@ -88,7 +88,7 @@ const EMPTY_CATALOG: RegistryCatalog = {
 
 // Short-lived cache so flipping between Discover sub-tabs doesn't refetch.
 let cache: { at: number; data: RegistryCatalog } | null = null;
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour – was 5 min; reduces GitHub API rate-limit pressure
 
 function authorName(author: IndexEntry["author"]): string | undefined {
   if (!author) return undefined;
@@ -337,9 +337,15 @@ let treeCache: { at: number; blobs: TreeBlob[] } | null = null;
 /** All file paths under a folder, via the cached recursive git tree. */
 async function listFolderFiles(folder: string): Promise<string[]> {
   if (!treeCache || Date.now() - treeCache.at >= CACHE_TTL_MS) {
-    const res = await fetch(TREE_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
+    // Use GITHUB_TOKEN / GH_TOKEN when available to avoid anonymous
+    // rate limits (60 req/h) on api.github.com.  Authenticated requests
+    // get 5 000 req/h instead.
+    const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
+    const headers: Record<string, string> = {
+      Accept: "application/vnd.github+json",
+    };
+    if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
+    const res = await fetch(TREE_URL, { headers });
     if (!res.ok) throw new Error(`Tree fetch failed (${res.status})`);
     const json = (await res.json()) as { tree?: TreeBlob[] };
     treeCache = { at: Date.now(), blobs: json.tree ?? [] };
