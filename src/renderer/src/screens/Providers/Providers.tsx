@@ -502,7 +502,10 @@ function Providers({
         brand: "custom",
         label,
         provider: "custom",
-        baseUrl: models[0]?.baseUrl || storedBaseUrl,
+        // Prefer the authoritative providers.json base URL so an edited endpoint
+        // routes newly picked models correctly; fall back to a saved model's URL
+        // only for orphan records whose stored base URL is blank.
+        baseUrl: storedBaseUrl || models[0]?.baseUrl || "",
         keyEnv,
         providerLabel: label,
         models,

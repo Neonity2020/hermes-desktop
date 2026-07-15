@@ -231,6 +231,10 @@ jobs:
           name: beta-linux-arm64-artifacts
           path: |
             dist/*.AppImage
+            # electron-builder emits an arch-specific beta-linux-arm64.yml for the
+            # arm64 AppImage; ship it so arm64 beta clients get their own feed
+            # instead of a missing/x64-only one.
+            dist/beta-linux-arm64.yml
 
   beta_windows:
     name: Build Windows
@@ -378,4 +382,5 @@ jobs:
             artifacts/*.blockmap
             artifacts/beta.yml
             artifacts/beta-linux.yml
+            artifacts/beta-linux-arm64.yml
             artifacts/beta-mac.yml
