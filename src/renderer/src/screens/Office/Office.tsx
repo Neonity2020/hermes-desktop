@@ -779,6 +779,7 @@ function Office({ visible, profile }: OfficeProps): React.JSX.Element {
             rep={activeRep}
             agents={positionedAgents}
             initialAgentId={selectedId ?? defaultAgentId}
+            visible={visible ?? true}
             onClose={closeRepPanel}
           />
         )}

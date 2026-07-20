@@ -149,11 +149,16 @@ export default function RepInteractionPanel({
   rep,
   agents,
   initialAgentId,
+  visible = true,
   onClose,
 }: {
   rep: SpaceRepresentative;
   agents: OfficeAgent[];
   initialAgentId: string | null;
+  // Whether the Office tab hosting this panel is the shown view. The panel
+  // stays mounted while the tab is hidden, so this re-triggers account
+  // resolution when the user returns (see the account-scope effect below).
+  visible?: boolean;
   onClose: () => void;
 }): React.JSX.Element {
   const { t } = useI18n();
@@ -167,8 +172,22 @@ export default function RepInteractionPanel({
   // The signed-in Hermes account id, used to scope the wallet cache so cached
   // financial data never survives a sign-out or relink. Null until resolved (or
   // when signed out), which makes cache lookups miss and writes no-op.
+  //
+  // Re-resolved every time the Office tab becomes visible, not just on mount:
+  // the panel can stay mounted while the tab is hidden and the user changes the
+  // Hermes account elsewhere (account management lives outside Office), so
+  // returning must re-check who's signed in. If the account changed, `accountId`
+  // updates, the cache key changes, and the rehydrate effect misses the previous
+  // account's entry instead of surfacing its portfolio.
   const [accountId, setAccountId] = useState<string | null>(null);
   useEffect(() => {
+    if (!visible) {
+      // Hidden: forget the resolved account so a stale balance can never flash
+      // on return before we re-check who's signed in. The rehydrate effect
+      // falls back to idle while the account is unknown.
+      setAccountId(null);
+      return;
+    }
     let alive = true;
     void window.hermesAPI
       .getAccount()
@@ -181,7 +200,7 @@ export default function RepInteractionPanel({
     return () => {
       alive = false;
     };
-  }, []);
+  }, [visible]);
 
   const cacheKey = useCallback(
     (id: string | null): string | null =>

@@ -209,4 +209,46 @@ describe("RepInteractionPanel", () => {
     expect(screen.queryByText("$42.00")).toBeNull();
     expect(screen.getByText("$—")).toBeTruthy();
   });
+
+  // @lat: [[office-interactions#Tests#Account scope refreshes on re-show]]
+  it("re-resolves the account when the tab is re-shown, panel still mounted", async () => {
+    const portfolio: WalletPortfolioResult = {
+      status: "ok",
+      totalUsd: 42,
+      tokens: [],
+    };
+    const panel = (visible: boolean): React.JSX.Element => (
+      <RepInteractionPanel
+        rep={REP}
+        agents={[agent("v")]}
+        initialAgentId="v"
+        visible={visible}
+        onClose={() => {}}
+      />
+    );
+    stubHermesAPI({
+      syncWallets: async () => walletResult("v"),
+      getWalletPortfolio: async () => portfolio,
+      accountId: "vis-1",
+    });
+    const { rerender } = render(panel(true));
+    await act(async () => {});
+    fireEvent.click(screen.getByText("office.repActionCheckBalance"));
+    await waitFor(() => expect(screen.getByText("$42.00")).toBeTruthy());
+
+    // The account changes elsewhere while the panel stays mounted (Office is
+    // only hidden, never unmounted). Hiding then re-showing the tab must
+    // re-resolve the account and drop the previous account's cached balance.
+    stubHermesAPI({
+      syncWallets: async () => walletResult("v"),
+      getWalletPortfolio: async () => portfolio,
+      accountId: "vis-2",
+    });
+    rerender(panel(false));
+    await act(async () => {});
+    rerender(panel(true));
+    await act(async () => {});
+    expect(screen.queryByText("$42.00")).toBeNull();
+    expect(screen.getByText("$—")).toBeTruthy();
+  });
 });
