@@ -64,6 +64,11 @@ export default {
   showroomCardColor: "Paint color",
   showroomCardHint:
     "Take a closer look around the showroom — buying cars for your agents is coming soon.",
+  // Walk mode (third-person avatar)
+  walkMode: "Walk around",
+  walkModeExit: "Exit walk (Esc)",
+  walkHint: "WASD / arrows to move · Shift to run · Esc to exit",
+  you: "You",
   // Space representatives (bank teller interaction menu)
   repBankTeller: "Bank Teller",
   spaceBank: "Bank",
@@ -88,6 +93,5 @@ export default {
   repBalanceTotal: "Total",
   repCreateSuccess: "Account created",
   repCreateExists: "This agent already has a bank account.",
-  repStatusForeign:
-    "This agent is linked to a different Hermes One account.",
+  repStatusForeign: "This agent is linked to a different Hermes One account.",
 } as const;
