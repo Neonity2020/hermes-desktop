@@ -26,9 +26,9 @@ Actions render as flex-wrapping chips (`visibleActions`) rather than a fixed gri
 
 ### Session cache
 
-Each agent's bank state (its one wallet + last portfolio + `hasAccount`) is cached in an in-memory `Map` keyed by agent id for the life of the app process, so reopening the panel avoids re-fetching.
+Each agent's bank state (its one wallet + last portfolio + `hasAccount`) is cached in an in-memory `Map`, keyed by `${signed-in account id}::${agent id}` so reopening avoids a re-fetch while cached financial data never crosses a sign-out or relink.
 
-The cache is [[src/renderer/src/screens/Office/RepInteractionPanel.tsx#bankCache]], written via [[src/renderer/src/screens/Office/RepInteractionPanel.tsx#rememberBank]] — in-memory only, no cloud wallet data persisted to disk, keeping the [[wallet-token-balances#Wallet Sync]] "never persist cloud wallets" principle. On mount or when the agent picker changes, the panel rehydrates from this cache: a known portfolio renders the balance instantly (no fetch) and a known account hides "Create account"; a cold agent falls back to idle. Cache writes are keyed by the request's own agent, so a late-arriving result still caches the correct agent even after the picker moved on.
+The cache is [[src/renderer/src/screens/Office/RepInteractionPanel.tsx#bankCache]], read via [[src/renderer/src/screens/Office/RepInteractionPanel.tsx#readBank]] and written via [[src/renderer/src/screens/Office/RepInteractionPanel.tsx#rememberBank]] — in-memory only, no cloud wallet data persisted to disk, keeping the [[wallet-token-balances#Wallet Sync]] "never persist cloud wallets" principle. The panel resolves the signed-in account id once on mount (`getAccount`, app-wide) and composes it into the cache key via `cacheKey`; a null id (unresolved or signed out) makes every lookup miss and every write a no-op, so no financial data is served or stored without a known account. If the same local profile is relinked to a different Hermes account mid-session, the account half of the key changes and the previous account's portfolio and wallet id are never read back. On mount, when the agent picker changes, or once the account id resolves, the panel rehydrates from this cache: a known portfolio renders the balance instantly (no fetch) and a known account hides "Create account"; a cold agent (or unknown account) falls back to idle. Cache writes are keyed by the request's own account + agent, so a late-arriving result still caches the correct entry even after the picker moved on.
 
 ## Backend Wallet Actions
 
@@ -51,3 +51,7 @@ The panel stays mounted while the Office selection changes; its agent picker fol
 ### Drops stale action results
 
 An action started for agent A whose response lands after the picker moved to agent B is discarded — B's context never shows A's wallets — while re-running the action for B renders B's data.
+
+### Wallet cache is account-scoped
+
+A balance cached under one signed-in account is not re-shown after the same profile is relinked to another account: reopening renders the neutral placeholder, never the prior account's figure, since the cache key includes the account id.
